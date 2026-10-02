@@ -69,3 +69,16 @@ npm run dev
    VITE_SUPABASE_URL=https://your-project.supabase.co
    VITE_SUPABASE_ANON_KEY=your-anon-public-key
    ```
+
+   ## Deploying on Vercel
+
+   This frontend is a Vite static site; Vercel builds it into `dist`. Import the repository into Vercel and use the project root as the Root Directory. The included `vercel.json` sets the build command, output directory, and SPA fallback for direct page loads. No Express server or separate backend deployment is required for the current frontend.
+
+   If using Supabase, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under **Project Settings → Environment Variables** in Vercel, then redeploy. The anon key is a browser-facing key; do not add a Supabase service-role key to any `VITE_*` variable. Supabase tables still need to be created by running `supabase/schema.sql` in the Supabase SQL Editor.
+
+   Without Supabase credentials, the app can still run in its local prototype mode. Verify a production build locally with:
+
+   ```bash
+   npm install
+   npm run build
+   ```
