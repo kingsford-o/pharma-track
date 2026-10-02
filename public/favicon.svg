@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="28" fill="#197882"/>
+  <g fill="#FFFFFF">
+    <!-- Vertical bar -->
+    <rect x="52" y="24" width="24" height="80" rx="12" fill="#FFFFFF"/>
+    <!-- Horizontal bar -->
+    <rect x="24" y="52" width="80" height="24" rx="12" fill="#FFFFFF"/>
+    <!-- Subtle central circular aperture -->
+    <circle cx="64" cy="64" r="8" fill="#A4D7DC"/>
+  </g>
+</svg>
