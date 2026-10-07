@@ -2,12 +2,11 @@ import React from 'react';
 import {
   LayoutDashboard,
   Layers,
-  CheckCircle2,
-  Database,
-  X,
   ShoppingCart,
   DollarSign,
-  RefreshCw
+  RefreshCw,
+  Database,
+  X,
 } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
 import { ActiveScreen } from '../types/pharmacy';
@@ -17,127 +16,104 @@ interface SidebarProps {
   setMobileOpen?: (open: boolean) => void;
 }
 
+const navItems: { id: ActiveScreen; label: string; icon: React.ElementType }[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'inventory', label: 'Inventory', icon: Layers },
+  { id: 'sales', label: 'Sales & Business', icon: ShoppingCart },
+  { id: 'finance', label: 'Finance & Accounts', icon: DollarSign },
+  { id: 'reconciliation', label: 'Reconciliation', icon: RefreshCw },
+];
+
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) => {
   const { activeScreen, setActiveScreen, setIsSchemaModalOpen } = usePharmacy();
 
-  const navItems: { id: ActiveScreen; label: string; icon: React.ReactNode }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="w-4 h-4" /> },
-    { id: 'inventory', label: 'Inventory', icon: <Layers className="w-4 h-4" /> },
-    { id: 'sales', label: 'Sales & Business', icon: <ShoppingCart className="w-4 h-4" /> },
-    { id: 'finance', label: 'Finance & Accounts', icon: <DollarSign className="w-4 h-4" /> },
-    { id: 'reconciliation', label: 'Reconciliation', icon: <RefreshCw className="w-4 h-4" /> },
-  ];
-
   const handleNavClick = (screen: ActiveScreen) => {
     setActiveScreen(screen);
-    if (setMobileOpen) setMobileOpen(false);
+    setMobileOpen?.(false);
   };
 
   return (
-    <aside 
-      className={`
-        fixed inset-y-0 left-0 z-40 w-64 bg-[#1E293B] text-slate-300 flex flex-col justify-between border-r border-slate-700/60
-        transition-transform duration-200 ease-in-out lg:translate-x-0 lg:static lg:h-screen
-        ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}
-    >
-      <div>
-        {/* Brand Header */}
-        <div className="flex items-center justify-between px-5 py-5 border-b border-slate-700/50">
-          <div className="flex items-center gap-3">
-            {/* Medipulse AI Brand Logo */}
-            <div className="w-9 h-9 rounded-lg bg-[#197882] flex items-center justify-center shadow-sm">
-              <svg className="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4z" rx="1" />
-                <circle cx="12" cy="12" r="1.5" fill="#A4D7DC" />
-              </svg>
-            </div>
-            <div>
-              <div className="text-white font-bold text-base leading-tight tracking-tight">
-                Medipulse AI
+    <>
+      {/* Mobile backdrop */}
+      <div
+        onClick={() => setMobileOpen?.(false)}
+        aria-hidden="true"
+        className={`fixed inset-0 z-30 bg-slate-900/40 backdrop-blur-[1px] transition-opacity lg:hidden ${
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+
+      <aside
+        className={`
+          fixed inset-y-0 left-0 z-40 flex w-64 flex-col justify-between border-r border-slate-200 bg-white
+          transition-transform duration-200 ease-out lg:static lg:h-screen lg:translate-x-0
+          ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
+        <div>
+          {/* Brand */}
+          <div className="flex h-16 items-center justify-between px-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600">
+                <svg className="h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4z" />
+                </svg>
               </div>
-              <div className="text-[10px] uppercase tracking-wider text-teal-400 font-semibold">
-                Pharmacy Management
+              <div>
+                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">Medipulse AI</div>
+                <div className="text-[11px] font-medium text-slate-500">Pharmacy management</div>
               </div>
             </div>
-          </div>
 
-          {/* Mobile close */}
-          {setMobileOpen && (
-            <button
-              onClick={() => setMobileOpen(false)}
-              className="lg:hidden text-slate-400 hover:text-white p-1"
-              aria-label="Close menu"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-
-        {/* Navigation Category */}
-        <div className="px-5 pt-6 pb-2">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Main Menu
-          </span>
-        </div>
-
-        {/* Navigation Links */}
-        <nav className="px-3 space-y-1">
-          {navItems.map((item) => {
-            const isActive = activeScreen === item.id;
-            return (
+            {setMobileOpen && (
               <button
-                key={item.id}
-                onClick={() => handleNavClick(item.id)}
-                className={`
-                  w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-sm font-medium transition-all text-left
-                  ${isActive 
-                    ? 'bg-[#1F8592] text-white shadow-sm font-semibold' 
-                    : 'text-slate-300 hover:text-white hover:bg-slate-800/80'}
-                `}
+                onClick={() => setMobileOpen(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden"
+                aria-label="Close menu"
               >
-                <span className={isActive ? 'text-white' : 'text-slate-400'}>
-                  {item.icon}
-                </span>
-                <span>{item.label}</span>
+                <X className="h-5 w-5" />
               </button>
-            );
-          })}
-        </nav>
-      </div>
-
-      {/* Footer System Status & Supabase SQL Hub */}
-      <div className="p-4 border-t border-slate-700/50">
-        <button
-          onClick={() => setIsSchemaModalOpen(true)}
-          className="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-slate-800/80 hover:bg-slate-700/90 border border-slate-700 text-xs text-slate-300 transition-colors group"
-          title="Click to view Supabase SQL schema and configuration"
-        >
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="font-medium text-slate-200 group-hover:text-white">
-              Database Synced
-            </span>
+            )}
           </div>
-          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-        </button>
 
-        <div className="mt-2.5 flex items-center justify-between text-[11px] text-slate-400 px-1">
-          <span className="flex items-center gap-1.5">
-            <Database className="w-3 h-3 text-teal-400" />
-            Supabase Ready
-          </span>
-          <button 
+          {/* Navigation */}
+          <nav className="mt-4 space-y-1 px-3" aria-label="Main">
+            {navItems.map(({ id, label, icon: Icon }) => {
+              const isActive = activeScreen === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => handleNavClick(id)}
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors ${
+                    isActive
+                      ? 'bg-brand-50 font-semibold text-brand-700'
+                      : 'font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                  }`}
+                >
+                  <Icon className={`h-[18px] w-[18px] ${isActive ? 'text-brand-600' : 'text-slate-400'}`} />
+                  {label}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Footer: plain-language status first, dev tools tucked away */}
+        <div className="space-y-3 border-t border-slate-100 p-4">
+          <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            All changes saved
+          </div>
+          <button
             onClick={() => setIsSchemaModalOpen(true)}
-            className="text-teal-400 hover:text-teal-300 underline font-medium cursor-pointer"
+            className="flex items-center gap-1.5 text-xs text-slate-400 transition-colors hover:text-slate-700"
           >
-            SQL Codes
+            <Database className="h-3.5 w-3.5" />
+            Database schema
           </button>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 };

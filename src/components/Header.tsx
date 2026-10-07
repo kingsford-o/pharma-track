@@ -1,38 +1,56 @@
-import React, { useState } from 'react';
-import { 
-  Search, 
-  Building2, 
-  ChevronDown, 
-  Menu,
-  Database,
-  Check,
-  Sparkles
-} from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Search, Building2, ChevronDown, Menu, Database, LogOut } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
+import { useProfile } from '../context/ProfileContext';
+import { supabase } from '../lib/supabaseClient';
 
 interface HeaderProps {
   onMenuClick: () => void;
 }
 
+function useClickOutside(ref: React.RefObject<HTMLElement | null>, onOutside: () => void) {
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOutside();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [ref, onOutside]);
+}
+
 export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const { items, setSelectedItemId, setActiveScreen, setIsSchemaModalOpen } = usePharmacy();
+  const { profile } = useProfile();
   const [searchTerm, setSearchTerm] = useState('');
-  const [searchResultsOpen, setSearchResultsOpen] = useState(false);
-  const [facilityOpen, setFacilityOpen] = useState(false);
-  const [userDropdownOpen, setUserDropdownOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [userOpen, setUserOpen] = useState(false);
 
-  const [activeFacility, setActiveFacility] = useState('St. Jude Community Pharmacy');
-  const [activeUser, setActiveUser] = useState({
-    name: 'Sarah Jenkins',
-    role: 'Pharmacist',
-    license: 'GPC-2024-8891'
-  });
+  const searchRef = useRef<HTMLDivElement>(null);
+  const userRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const filteredItems = searchTerm.trim() 
-    ? items.filter(i => 
-        i.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        i.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        i.batches.some(b => b.batchNo.toLowerCase().includes(searchTerm.toLowerCase()))
+  useClickOutside(searchRef, () => setSearchOpen(false));
+  useClickOutside(userRef, () => setUserOpen(false));
+
+  // Ctrl/Cmd + K focuses search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const term = searchTerm.trim().toLowerCase();
+  const filteredItems = term
+    ? items.filter(
+        (i) =>
+          i.name.toLowerCase().includes(term) ||
+          i.sku.toLowerCase().includes(term) ||
+          i.batches.some((b) => b.batchNo.toLowerCase().includes(term)),
       )
     : [];
 
@@ -40,73 +58,82 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
     setSelectedItemId(itemId);
     setActiveScreen('bincard');
     setSearchTerm('');
-    setSearchResultsOpen(false);
+    setSearchOpen(false);
   };
 
+  const managerName = profile?.manager_name ?? '';
+  const initials = managerName
+    .split(' ')
+    .filter(Boolean)
+    .map((p) => p[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
   return (
-    <header className="sticky top-0 z-30 bg-white border-b border-slate-200/90 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
-      {/* Mobile Drawer Trigger & Search */}
-      <div className="flex items-center gap-3 flex-1 max-w-xl">
+    <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+      {/* Menu + search */}
+      <div className="flex max-w-xl flex-1 items-center gap-2">
         <button
           onClick={onMenuClick}
-          className="lg:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 focus:outline-none"
-          aria-label="Toggle navigation menu"
+          className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
+          aria-label="Open menu"
         >
-          <Menu className="w-5 h-5" />
+          <Menu className="h-5 w-5" />
         </button>
 
-        {/* Global Drug / Batch Search */}
-        <div className="relative flex-1">
-          <div className="relative flex items-center">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search drug, batch or code (⌘K)"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setSearchResultsOpen(true);
-              }}
-              onFocus={() => setSearchResultsOpen(true)}
-              className="w-full pl-9 pr-12 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white transition-colors"
-            />
-            <span className="hidden sm:inline-block absolute right-2.5 text-[10px] font-mono text-slate-400 bg-slate-200/60 px-1.5 py-0.5 rounded">
-              ⌘K
-            </span>
-          </div>
+        <div className="relative flex-1" ref={searchRef}>
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search drug, batch or code"
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setSearchOpen(true);
+            }}
+            onFocus={() => setSearchOpen(true)}
+            className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-14 text-sm text-slate-800 placeholder-slate-400 transition-colors focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+          />
+          <kbd className="pointer-events-none absolute right-2.5 top-1/2 hidden -translate-y-1/2 rounded border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-400 sm:inline-block">
+            Ctrl K
+          </kbd>
 
-          {/* Search Dropdown Results */}
-          {searchResultsOpen && searchTerm.trim() && (
-            <div className="absolute top-full left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden divide-y divide-slate-100 max-h-72 overflow-y-auto">
+          {searchOpen && term && (
+            <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-lg">
               {filteredItems.length > 0 ? (
-                filteredItems.map(item => (
+                filteredItems.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => handleSelectSearchResult(item.id)}
-                    className="w-full px-3.5 py-2.5 text-left hover:bg-teal-50/60 flex items-center justify-between group transition-colors"
+                    className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-0 hover:bg-brand-50/60"
                   >
-                    <div>
-                      <div className="text-xs font-semibold text-slate-800 group-hover:text-teal-800">
-                        {item.name}
-                      </div>
-                      <div className="text-[11px] text-slate-500">
-                        {item.presentation} · SKU: {item.sku} · Shelf: {item.shelfLocation}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold text-slate-800">{item.name}</div>
+                      <div className="truncate text-xs text-slate-500">
+                        {item.presentation} · SKU {item.sku} · Shelf {item.shelfLocation}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className={`text-xs font-semibold font-mono tabular-nums ${
-                        item.currentBalance === 0 ? 'text-rose-600' :
-                        item.currentBalance <= item.minThreshold ? 'text-amber-600' : 'text-slate-700'
-                      }`}>
+                    <div className="shrink-0 text-right">
+                      <div
+                        className={`font-mono text-xs font-semibold tabular-nums ${
+                          item.currentBalance === 0
+                            ? 'text-rose-600'
+                            : item.currentBalance <= item.minThreshold
+                              ? 'text-amber-600'
+                              : 'text-slate-700'
+                        }`}
+                      >
                         {item.currentBalance} {item.unit}
-                      </span>
-                      <div className="text-[10px] text-slate-400">View Bin Card →</div>
+                      </div>
+                      <div className="text-[11px] text-slate-400">Open bin card</div>
                     </div>
                   </button>
                 ))
               ) : (
-                <div className="px-4 py-3 text-xs text-slate-500 text-center">
-                  No matching drug or batch found for "{searchTerm}".
+                <div className="px-4 py-4 text-center text-sm text-slate-500">
+                  No drug or batch matches "{searchTerm}". Check the spelling or try the SKU.
                 </div>
               )}
             </div>
@@ -114,103 +141,52 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         </div>
       </div>
 
-      {/* Right Controls: Facility Badge, Supabase Button & Pharmacist Profile */}
-      <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-        {/* Supabase Quick Code Button */}
-        <button
-          onClick={() => setIsSchemaModalOpen(true)}
-          className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors border border-slate-200/80 cursor-pointer"
-          title="View & Copy Supabase PostgreSQL Schema"
-        >
-          <Database className="w-3.5 h-3.5 text-teal-600" />
-          <span>Supabase SQL</span>
-        </button>
-
-        {/* Facility Selector */}
-        <div className="relative">
-          <button
-            onClick={() => setFacilityOpen(!facilityOpen)}
-            className="flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-sky-50/60 border border-sky-100 rounded-lg hover:bg-sky-100/60 transition-colors"
-          >
-            <Building2 className="w-3.5 h-3.5 text-sky-600" />
-            <span className="hidden sm:inline font-semibold">{activeFacility}</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-          </button>
-
-          {facilityOpen && (
-            <div className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-1.5 text-xs divide-y divide-slate-100">
-              <div className="px-2 py-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                Assigned Dispensaries
-              </div>
-              <button
-                onClick={() => { setActiveFacility('St. Jude Community Pharmacy'); setFacilityOpen(false); }}
-                className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-slate-50 rounded"
-              >
-                <div>
-                  <div className="font-semibold text-slate-800">St. Jude Community Pharmacy</div>
-                  <div className="text-[10px] text-slate-500">Central Dispensary · Accra</div>
-                </div>
-                {activeFacility === 'St. Jude Community Pharmacy' && <Check className="w-4 h-4 text-teal-600" />}
-              </button>
-              <button
-                onClick={() => { setActiveFacility('Ridge Regional Satellite'); setFacilityOpen(false); }}
-                className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-slate-50 rounded"
-              >
-                <div>
-                  <div className="font-semibold text-slate-800">Ridge Regional Satellite</div>
-                  <div className="text-[10px] text-slate-500">Outpatient Depot #2</div>
-                </div>
-                {activeFacility === 'Ridge Regional Satellite' && <Check className="w-4 h-4 text-teal-600" />}
-              </button>
-            </div>
-          )}
+      {/* Pharmacy + user */}
+      <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+        <div className="hidden h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 md:flex">
+          <Building2 className="h-4 w-4 text-brand-600" />
+          <span className="max-w-50 truncate">{profile?.name}</span>
         </div>
 
-        {/* Pharmacist User Profile Badge */}
-        <div className="relative">
+        <div className="relative" ref={userRef}>
           <button
-            onClick={() => setUserDropdownOpen(!userDropdownOpen)}
-            className="flex items-center gap-2.5 text-xs text-slate-600 hover:text-slate-900 group"
+            onClick={() => setUserOpen((o) => !o)}
+            aria-expanded={userOpen}
+            className="flex items-center gap-2.5 rounded-lg p-1 pr-2 hover:bg-slate-50"
           >
-            {/* User Avatar */}
-            <div className="relative w-8 h-8 rounded-full bg-slate-200 ring-2 ring-teal-500/30 overflow-hidden flex items-center justify-center font-bold text-teal-800 text-xs shadow-inner">
-              <span className="sr-only">{activeUser.name}</span>
-              SJ
-            </div>
-            <div className="hidden lg:block text-left">
-              <div className="text-[10px] text-slate-400 leading-none">Using as:</div>
-              <div className="font-semibold text-slate-800 leading-tight">
-                {activeUser.name}, {activeUser.role}
-              </div>
-            </div>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600" />
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700">
+              {initials}
+            </span>
+            <span className="hidden text-left lg:block">
+              <span className="block text-sm font-semibold leading-tight text-slate-800">{managerName}</span>
+              <span className="block text-xs text-slate-500">Manager</span>
+            </span>
+            <ChevronDown className="hidden h-4 w-4 text-slate-400 sm:block" />
           </button>
 
-          {userDropdownOpen && (
-            <div className="absolute right-0 mt-1.5 w-56 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 text-xs">
-              <div className="px-2 py-1.5 border-b border-slate-100">
-                <div className="font-bold text-slate-800">{activeUser.name}</div>
-                <div className="text-[11px] text-teal-600 font-medium">Licensed {activeUser.role}</div>
-                <div className="text-[10px] text-slate-400 font-mono">Reg: {activeUser.license}</div>
+          {userOpen && (
+            <div className="absolute right-0 z-50 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+              <div className="border-b border-slate-100 px-2.5 py-2">
+                <div className="text-sm font-bold text-slate-800">{managerName}</div>
+                <div className="text-xs text-slate-500">{profile?.name}</div>
               </div>
               <div className="py-1">
                 <button
                   onClick={() => {
-                    setActiveUser({ name: 'A. Patel', role: 'Pharmacist', license: 'GPC-2022-4410' });
-                    setUserDropdownOpen(false);
+                    setIsSchemaModalOpen(true);
+                    setUserOpen(false);
                   }}
-                  className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded text-slate-700"
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-slate-500 hover:bg-slate-50"
                 >
-                  Switch to A. Patel, Pharmacist
+                  <Database className="h-4 w-4" />
+                  Database schema
                 </button>
                 <button
-                  onClick={() => {
-                    setActiveUser({ name: 'M. Davis', role: 'Dispenser', license: 'GPC-2025-1033' });
-                    setUserDropdownOpen(false);
-                  }}
-                  className="w-full text-left px-2 py-1.5 hover:bg-slate-50 rounded text-slate-700"
+                  onClick={() => supabase.auth.signOut()}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                 >
-                  Switch to M. Davis, Dispenser
+                  <LogOut className="h-4 w-4" />
+                  Sign out
                 </button>
               </div>
             </div>
