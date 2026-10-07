@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
 
-export const BinCardScreen: React.FC = () => {
+export const BinCardScreen: React.FC<{ controlledRegister?: boolean }> = ({ controlledRegister = false }) => {
   const { 
     items, 
     ledger, 
@@ -68,11 +68,17 @@ export const BinCardScreen: React.FC = () => {
           </span>
           <span>&gt;</span>
           <span className="cursor-pointer hover:text-slate-800" onClick={() => setActiveScreen('inventory')}>
-            Bin Cards
+            {controlledRegister ? 'Controlled drug register' : 'Bin Cards'}
           </span>
           <span>&gt;</span>
           <span className="font-bold text-slate-900">{currentItem?.name}</span>
         </div>
+
+        {controlledRegister && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Controlled drug movements are shown in the stock ledger below. Record each receipt and dispensing transaction to maintain this register.
+          </div>
+        )}
 
         {/* Drug Selector Switcher */}
         <div className="flex items-center gap-2 self-start sm:self-auto">

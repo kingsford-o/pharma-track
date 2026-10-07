@@ -68,11 +68,16 @@ npm run dev
    ```env
    VITE_SUPABASE_URL=https://your-project.supabase.co
    VITE_SUPABASE_ANON_KEY=your-anon-public-key
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+   MANAGER_APPROVAL_PASSWORD=use-a-long-private-approval-password
    ```
+4. Keep `SUPABASE_SERVICE_ROLE_KEY` and `MANAGER_APPROVAL_PASSWORD` only in the server environment; never prefix them with `VITE_`. In Supabase **Authentication → Settings**, disable public sign-ups so new accounts can only be created through the manager-approved server endpoint. The manager shares the approval password with staff; users choose their own email and password, and their credentials are stored by Supabase Auth.
+5. Run the Express server with `npm run dev`, or deploy the Express server and Vercel `api/auth/signup` function with those server-only environment variables configured. The Vite static site by itself cannot securely validate a manager password.
 
    ## Deploying on Vercel
 
-   This frontend is a Vite static site; Vercel builds it into `dist`. Import the repository into Vercel and use the project root as the Root Directory. The included `vercel.json` sets the build command, output directory, and SPA fallback for direct page loads. No Express server or separate backend deployment is required for the current frontend.
+   Vercel builds the frontend into `dist` and deploys `api/auth/signup.ts` as a serverless function. Import the repository into Vercel and use the project root as the Root Directory. Configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `MANAGER_APPROVAL_PASSWORD` as server-only environment variables, plus the two `VITE_*` browser variables.
 
    If using Supabase, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` under **Project Settings → Environment Variables** in Vercel, then redeploy. The anon key is a browser-facing key; do not add a Supabase service-role key to any `VITE_*` variable. Supabase tables still need to be created by running `supabase/schema.sql` in the Supabase SQL Editor.
 

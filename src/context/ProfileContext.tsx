@@ -3,12 +3,19 @@ import { supabase } from '../lib/supabaseClient';
 import { OnboardingScreen } from '../components/screens/OnboardingScreen';
 
 export type InventorySize = 'small' | 'medium' | 'large';
+export type StockCategory =
+  | 'prescription_medicines'
+  | 'over_the_counter'
+  | 'controlled_drugs'
+  | 'herbal_and_supplements'
+  | 'medical_supplies';
 
 export interface PharmacyProfile {
   id: string;
   name: string;
   manager_name: string;
   inventory_size: InventorySize;
+  stock_categories: StockCategory[];
 }
 
 export type NewProfile = Omit<PharmacyProfile, 'id'>;
@@ -29,7 +36,7 @@ export const useProfile = () => {
   return ctx;
 };
 
-const COLUMNS = 'id, name, manager_name, inventory_size';
+const COLUMNS = 'id, name, manager_name, inventory_size, stock_categories';
 
 export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNode }> = ({ userId, children }) => {
   const [profile, setProfile] = useState<PharmacyProfile | null>(null);

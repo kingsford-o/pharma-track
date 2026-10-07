@@ -11,8 +11,10 @@ import {
   FileText
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
+import { useProfile } from '../../context/ProfileContext';
 
 export const DispenseScreen: React.FC = () => {
+  const { profile } = useProfile();
   const { 
     items, 
     selectedItemId, 
@@ -26,6 +28,7 @@ export const DispenseScreen: React.FC = () => {
   // Dispense Form state
   const [quantityToDispense, setQuantityToDispense] = useState<number | string>(500); // Default from screenshot showing 500
   const [referenceNo, setReferenceNo] = useState('RX-2026-9814 (Outpatient OPD)');
+  const [prescriberName, setPrescriberName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -33,6 +36,7 @@ export const DispenseScreen: React.FC = () => {
   const availableBalance = currentItem?.currentBalance || 0;
   const isShortfall = reqQty > availableBalance;
   const shortfallAmount = reqQty - availableBalance;
+  const requiresPrescriber = profile?.stock_categories.includes('prescription_medicines') ?? false;
 
   // Auto-Ranked FEFO Batch allocation simulation
   // Batches ordered by expiry date
@@ -79,6 +83,11 @@ export const DispenseScreen: React.FC = () => {
       return;
     }
 
+    if (requiresPrescriber && !prescriberName.trim()) {
+      setStatusMessage({ type: 'error', text: 'Enter the prescriber for this prescription before dispensing.' });
+      return;
+    }
+
     setSubmitting(true);
     setStatusMessage(null);
 
@@ -86,6 +95,7 @@ export const DispenseScreen: React.FC = () => {
       itemId: currentItem.id,
       quantityToDispense: reqQty,
       referenceNo: referenceNo.trim(),
+      prescriberName: requiresPrescriber ? prescriberName.trim() : undefined,
       destinationOrPatient: referenceNo.includes('OPD') ? 'Outpatient Dispensary (OPD)' : 'Clinical Ward',
       recordedBy: 'S. Jenkins, Pharmacist',
     });
@@ -284,6 +294,23 @@ export const DispenseScreen: React.FC = () => {
                 Enter formal prescription ID, clinic transfer code, or ward voucher
               </p>
             </div>
+
+            {requiresPrescriber && (
+              <div>
+                <label htmlFor="prescriber-name" className="mb-1.5 block text-xs font-bold text-slate-700">
+                  Prescriber <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  id="prescriber-name"
+                  type="text"
+                  required
+                  value={prescriberName}
+                  onChange={(event) => setPrescriberName(event.target.value)}
+                  placeholder="Prescriber's full name"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-teal-500"
+                />
+              </div>
+            )}
 
             {/* Automated Batch Allocation (FEFO Policy) Box */}
             <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 space-y-3">

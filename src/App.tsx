@@ -54,6 +54,7 @@ const MainLayout: React.FC = () => {
           {activeScreen === 'dispense' && <DispenseScreen />}
           {activeScreen === 'inventory' && <InventoryScreen />}
           {activeScreen === 'bincard' && <BinCardScreen />}
+          {activeScreen === 'controlled-register' && <BinCardScreen controlledRegister />}
           {activeScreen === 'sales' && <div className="text-center py-20 text-slate-500">Sales & Business - Coming Soon</div>}
           {activeScreen === 'finance' && <div className="text-center py-20 text-slate-500">Finance & Accounts - Coming Soon</div>}
           {activeScreen === 'reconciliation' && <div className="text-center py-20 text-slate-500">Reconciliation - Coming Soon</div>}

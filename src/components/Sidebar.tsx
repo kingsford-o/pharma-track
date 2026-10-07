@@ -7,8 +7,10 @@ import {
   RefreshCw,
   Database,
   X,
+  ClipboardList,
 } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
+import { useProfile } from '../context/ProfileContext';
 import { ActiveScreen } from '../types/pharmacy';
 
 interface SidebarProps {
@@ -26,6 +28,10 @@ const navItems: { id: ActiveScreen; label: string; icon: React.ElementType }[] =
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) => {
   const { activeScreen, setActiveScreen, setIsSchemaModalOpen } = usePharmacy();
+  const { profile } = useProfile();
+  const visibleNavItems = profile?.stock_categories.includes('controlled_drugs')
+    ? [...navItems, { id: 'controlled-register' as const, label: 'Controlled drug register', icon: ClipboardList }]
+    : navItems;
 
   const handleNavClick = (screen: ActiveScreen) => {
     setActiveScreen(screen);
@@ -60,7 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
                 </svg>
               </div>
               <div>
-                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">Medipulse AI</div>
+                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">Axelle MD</div>
                 <div className="text-[11px] font-medium text-slate-500">Pharmacy management</div>
               </div>
             </div>
@@ -78,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
 
           {/* Navigation */}
           <nav className="mt-4 space-y-1 px-3" aria-label="Main">
-            {navItems.map(({ id, label, icon: Icon }) => {
+            {visibleNavItems.map(({ id, label, icon: Icon }) => {
               const isActive = activeScreen === id;
               return (
                 <button

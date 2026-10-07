@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { InventorySize, NewProfile } from '../../context/ProfileContext';
+import type { InventorySize, NewProfile, StockCategory } from '../../context/ProfileContext';
 
 interface OnboardingScreenProps {
   onSubmit: (input: NewProfile) => Promise<void>;
@@ -12,6 +12,14 @@ const SIZES: { value: InventorySize; label: string; hint: string }[] = [
   { value: 'large', label: 'Large', hint: 'More than 1,000 products' },
 ];
 
+const STOCK_CATEGORIES: { value: StockCategory; label: string }[] = [
+  { value: 'prescription_medicines', label: 'Prescription medicines' },
+  { value: 'over_the_counter', label: 'Over-the-counter' },
+  { value: 'controlled_drugs', label: 'Controlled drugs' },
+  { value: 'herbal_and_supplements', label: 'Herbal and supplements' },
+  { value: 'medical_supplies', label: 'Medical supplies' },
+];
+
 const inputClass =
   'h-11 w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 placeholder-slate-400 transition-colors focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500/20';
 
@@ -19,6 +27,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onSubmit }) 
   const [pharmacyName, setPharmacyName] = useState('');
   const [managerName, setManagerName] = useState('');
   const [size, setSize] = useState<InventorySize | ''>('');
+  const [stockCategories, setStockCategories] = useState<StockCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -26,8 +35,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onSubmit }) 
     e.preventDefault();
     setError('');
 
-    if (!pharmacyName.trim() || !managerName.trim() || !size) {
-      setError('Fill in your pharmacy name, your name and pick an inventory size.');
+    if (!pharmacyName.trim() || !managerName.trim() || !size || stockCategories.length === 0) {
+      setError('Fill in your pharmacy name, your name, inventory size, and at least one stock type.');
       return;
     }
 
@@ -37,6 +46,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onSubmit }) 
         name: pharmacyName.trim(),
         manager_name: managerName.trim(),
         inventory_size: size,
+        stock_categories: stockCategories,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -53,7 +63,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onSubmit }) 
               <path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4z" />
             </svg>
           </div>
-          <div className="text-lg font-bold text-slate-900">Medipulse AI</div>
+          <div className="text-lg font-bold text-slate-900">Axelle MD</div>
         </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Set up your pharmacy</h1>
@@ -110,6 +120,28 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onSubmit }) 
                   />
                   <div className="text-sm font-semibold text-slate-800">{s.label}</div>
                   <div className="mt-0.5 text-xs text-slate-500">{s.hint}</div>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend className="mb-1.5 block text-sm font-medium text-slate-700">What do you stock?</legend>
+            <p className="mb-2 text-xs text-slate-500">Choose all that apply. We will tailor features to your pharmacy.</p>
+            <div className="space-y-2">
+              {STOCK_CATEGORIES.map(({ value, label }) => (
+                <label key={value} className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={stockCategories.includes(value)}
+                    onChange={(event) => {
+                      setStockCategories((current) =>
+                        event.target.checked ? [...current, value] : current.filter((category) => category !== value),
+                      );
+                    }}
+                    className="h-4 w-4 rounded border-slate-300 accent-brand-600"
+                  />
+                  {label}
                 </label>
               ))}
             </div>

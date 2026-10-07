@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { handleSignup } from './server/authSignup';
 
 dotenv.config();
 
@@ -13,6 +14,10 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
+
+app.post('/api/auth/signup', (req, res, next) => {
+  handleSignup(req, res).catch(next);
+});
 
 // API: Health Check
 app.get('/api/health', (req, res) => {

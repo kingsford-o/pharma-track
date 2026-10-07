@@ -28,6 +28,7 @@ interface DispenseStockParams {
   quantityToDispense: number;
   referenceNo: string;
   destinationOrPatient: string;
+  prescriberName?: string;
   notes?: string;
   recordedBy?: string;
 }
@@ -317,7 +318,10 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       rawDate: '2026-10-01',
       type: 'Dispensed',
       supplierOrCustomer: params.destinationOrPatient || 'Outpatient Dispensary (OPD #1098)',
-      referenceDetails: params.referenceNo || 'Direct ambulatory issue',
+      referenceDetails: [
+        params.referenceNo || 'Direct ambulatory issue',
+        params.prescriberName ? `Prescriber: ${params.prescriberName}` : '',
+      ].filter(Boolean).join(' · '),
       batchNo: primaryBatchNo,
       expiryLabel: primaryExpiryLabel,
       qtyIn: null,
