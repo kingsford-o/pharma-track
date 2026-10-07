@@ -60,4 +60,4 @@ export interface MarketBenchmark {
   lastUpdated: string;
 }
 
-export type ActiveScreen = 'dashboard' | 'receive' | 'dispense' | 'inventory' | 'bincard';
+export type ActiveScreen = 'dashboard' | 'receive' | 'dispense' | 'inventory' | 'bincard' | 'sales' | 'finance' | 'reconciliation';
