@@ -1,10 +1,7 @@
 import React from 'react';
 import {
   LayoutDashboard,
-  Inbox,
-  Send,
   Layers,
-  FileText,
   CheckCircle2,
   Database,
   X,
