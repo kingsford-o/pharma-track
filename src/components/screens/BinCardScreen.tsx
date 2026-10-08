@@ -19,7 +19,8 @@ export const BinCardScreen: React.FC<{ controlledRegister?: boolean }> = ({ cont
     ledger, 
     selectedItemId, 
     setSelectedItemId, 
-    setActiveScreen 
+    setActiveScreen,
+    syncTimestamp,
   } = usePharmacy();
 
   const [filterType, setFilterType] = useState<'All' | 'Received' | 'Dispensed'>('All');
@@ -29,6 +30,7 @@ export const BinCardScreen: React.FC<{ controlledRegister?: boolean }> = ({ cont
 
   // Filter transactions for this specific item
   const itemLedger = ledger.filter(tx => {
+    if (tx.itemId !== currentItem?.id) return false;
     if (filterType === 'All') return true;
     return tx.type === filterType;
   });
@@ -265,7 +267,7 @@ export const BinCardScreen: React.FC<{ controlledRegister?: boolean }> = ({ cont
             </button>
 
             <span className="text-xs text-slate-400 font-medium ml-2">
-              As of 01 Oct 2026
+              {syncTimestamp ? `As of ${syncTimestamp}` : 'Sync pending'}
             </span>
           </div>
         </div>

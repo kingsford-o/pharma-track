@@ -3,18 +3,15 @@ import {
   FileCheck2, 
   Clock, 
   CheckCircle2, 
-  TrendingUp, 
-  HelpCircle, 
   ShieldCheck, 
-  AlertCircle,
-  PlusCircle,
-  Building
+  AlertCircle
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
 
 export const ReceiveStockScreen: React.FC = () => {
   const { 
     items, 
+    ledger,
     selectedItemId, 
     setSelectedItemId, 
     receiveStock, 
@@ -25,15 +22,15 @@ export const ReceiveStockScreen: React.FC = () => {
   const currentItem = items.find(i => i.id === selectedItemId) || items[0];
 
   // Form states
-  const [supplier, setSupplier] = useState('PrimeCare Wholesale Ltd');
-  const [batchNo, setBatchNo] = useState('PRC-26M18');
-  const [expiryDate, setExpiryDate] = useState('2028-09-15');
-  const [quantityReceived, setQuantityReceived] = useState<number | string>(1000);
+  const [supplier, setSupplier] = useState('');
+  const [batchNo, setBatchNo] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
+  const [quantityReceived, setQuantityReceived] = useState<number | string>('');
   const [physicalCountAvailable, setPhysicalCountAvailable] = useState<number | string>(
-    currentItem?.currentBalance || 420
+    currentItem?.currentBalance ?? 0
   );
-  const [costPriceGhc, setCostPriceGhc] = useState<number | string>(currentItem?.costPriceGhc || 0.25);
-  const [sellingPriceGhc, setSellingPriceGhc] = useState<number | string>(currentItem?.sellingPriceGhc || 0.40);
+  const [costPriceGhc, setCostPriceGhc] = useState<number | string>(currentItem?.costPriceGhc || '');
+  const [sellingPriceGhc, setSellingPriceGhc] = useState<number | string>(currentItem?.sellingPriceGhc || '');
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -41,11 +38,11 @@ export const ReceiveStockScreen: React.FC = () => {
   useEffect(() => {
     if (currentItem) {
       setPhysicalCountAvailable(currentItem.currentBalance);
-      setCostPriceGhc(currentItem.costPriceGhc);
-      setSellingPriceGhc(currentItem.sellingPriceGhc);
-      // Auto-generate realistic next batch code
-      const prefix = currentItem.sku.split('-')[1] || 'MED';
-      setBatchNo(`${prefix}-26M18`);
+      setCostPriceGhc(currentItem.costPriceGhc || '');
+      setSellingPriceGhc(currentItem.sellingPriceGhc || '');
+      setBatchNo('');
+      setExpiryDate('');
+      setQuantityReceived('');
     }
   }, [currentItem?.id]);
 
@@ -85,26 +82,41 @@ export const ReceiveStockScreen: React.FC = () => {
 
     const res = await receiveStock({
       itemId: currentItem.id,
-      supplier,
+      supplier: supplier.trim(),
       batchNo: batchNo.trim(),
       expiryDate,
       quantityReceived: incomingQty,
       physicalCountBeforeReceipt: verifiedShelfBalance,
       costPriceGhc: cost,
       sellingPriceGhc: sell,
-      recordedBy: 'S. Jenkins, Pharmacist',
     });
 
     setSubmitting(false);
 
     if (res.success) {
       setStatusMessage({ type: 'success', text: res.message });
-      // Generate next batch code for next receipt
-      setBatchNo(`PRC-${Math.floor(Math.random() * 80 + 20)}K${Math.floor(Math.random() * 80 + 10)}`);
+      setPhysicalCountAvailable(verifiedShelfBalance + incomingQty);
+      setBatchNo('');
+      setExpiryDate('');
+      setQuantityReceived('');
     } else {
       setStatusMessage({ type: 'error', text: res.message });
     }
   };
+
+  if (!currentItem) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 text-center">
+        <h1 className="text-xl font-bold text-slate-900">No inventory items yet</h1>
+        <p className="mt-2 text-sm text-slate-500">Add a medicine to your pharmacy inventory before recording a delivery.</p>
+        <button onClick={() => setActiveScreen('inventory')} className="mt-5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Open inventory
+        </button>
+      </div>
+    );
+  }
+
+  const recentDeliveries = ledger.filter((entry) => entry.itemId === currentItem.id && entry.type === 'Received').slice(0, 5);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
@@ -209,7 +221,7 @@ export const ReceiveStockScreen: React.FC = () => {
                     Physical Stock Verification (Clinical Audit Step)
                   </div>
                   <p className="text-sky-700 text-[11px] mt-0.5">
-                    Before adding incoming consignment, verify current shelf stock. Any physical discrepancy will reconcile the perpetual ledger.
+                    Confirm the recorded shelf balance before adding a delivery. Resolve any discrepancy before posting the new batch.
                   </p>
                   <div className="mt-2 flex items-center gap-3">
                     <span className="font-semibold text-sky-900 text-xs">
@@ -230,23 +242,19 @@ export const ReceiveStockScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Supplier Dropdown */}
+            {/* Supplier */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 Supplier <span className="text-rose-500">*</span>
               </label>
-              <select
+              <input
+                type="text"
+                required
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
+                placeholder="Enter the supplier name"
                 className="w-full py-2.5 px-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
-              >
-                <option value="PrimeCare Wholesale Ltd">PrimeCare Wholesale Ltd</option>
-                <option value="Medix Global Pharma">Medix Global Pharma</option>
-                <option value="Pharmanova Africa">Pharmanova Africa</option>
-                <option value="Ernest Chemists Ltd">Ernest Chemists Ltd</option>
-                <option value="Tobinco Pharmaceuticals">Tobinco Pharmaceuticals</option>
-                <option value="Novartis Healthcare">Novartis Healthcare</option>
-              </select>
+              />
             </div>
 
             {/* Batch Number & Expiry Date */}
@@ -274,6 +282,7 @@ export const ReceiveStockScreen: React.FC = () => {
                   required
                   value={expiryDate}
                   onChange={(e) => setExpiryDate(e.target.value)}
+                  min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}
                   className="w-full py-2.5 px-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
                 />
               </div>
@@ -425,69 +434,25 @@ export const ReceiveStockScreen: React.FC = () => {
             </span>
           </div>
 
-          <div className="space-y-3">
-            {/* Delivery 1 */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-slate-50 transition-colors">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-mono font-bold text-slate-800">
-                  Batch: PRC-26K02
-                </span>
-                <span className="text-slate-400 font-medium">14 Sep 2026</span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs my-1">
-                <span className="font-bold text-emerald-700 font-mono">
-                  Qty: +800 tabs
-                </span>
-                <span className="font-mono text-slate-500">Cost: GH₵ 0.25</span>
-              </div>
-
-              <div className="text-[11px] text-slate-500 leading-tight">
-                Supplier: PrimeCare Wholesale Ltd
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-200/60">
-                <span className="text-slate-400">Exp: Aug 2027</span>
-                <span className="font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                  Verified
-                </span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-1">
-                Recorded by: A. Patel, Pharmacist
-              </div>
-            </div>
-
-            {/* Delivery 2 */}
-            <div className="p-3.5 rounded-lg border border-slate-200 bg-slate-50/60 hover:bg-slate-50 transition-colors">
-              <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-mono font-bold text-slate-800">
-                  Batch: PRC-26H14
-                </span>
-                <span className="text-slate-400 font-medium">15 Aug 2026</span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs my-1">
-                <span className="font-bold text-emerald-700 font-mono">
-                  Qty: +500 tabs
-                </span>
-                <span className="font-mono text-slate-500">Cost: GH₵ 0.25</span>
-              </div>
-
-              <div className="text-[11px] text-slate-500 leading-tight">
-                Supplier: PrimeCare Wholesale Ltd
-              </div>
-
-              <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-200/60">
-                <span className="text-slate-400">Exp: Nov 2026</span>
-                <span className="font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                  Verified
-                </span>
-              </div>
-              <div className="text-[10px] text-slate-400 mt-1">
-                Recorded by: S. Jenkins, Pharmacist
-              </div>
-            </div>
-          </div>
+          {recentDeliveries.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">No deliveries have been recorded for this medicine.</p>
+          ) : (
+            <ul className="space-y-3">
+              {recentDeliveries.map((entry) => (
+                <li key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3.5">
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate font-mono font-bold text-slate-800">Batch: {entry.batchNo || '—'}</span>
+                    <span className="shrink-0 text-slate-500">{entry.date}</span>
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-emerald-700">
+                    Qty: +{entry.qtyIn ?? 0} {currentItem.unit}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">Supplier: {entry.supplierOrCustomer || '—'}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Expiry: {entry.expiryLabel || '—'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>

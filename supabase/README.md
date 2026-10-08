@@ -1,21 +1,11 @@
-# PharmaTrack Dispensary OS - Supabase Setup Guide
+# Supabase setup
 
-## 1. Quick Setup in Supabase
-1. Go to your [Supabase Dashboard](https://supabase.com/dashboard) and create a new project (e.g. `pharmatrack-os`).
-2. Navigate to the **SQL Editor** tab on the left navigation bar.
-3. Click **New Query**, paste the contents of `supabase/schema.sql`, and click **Run**.
-4. All tables (`formulary_items`, `batches`, `stock_ledger`, `market_benchmarks`), views (`v_low_stock_items`, `v_expiring_batches`), and seed records will be created automatically.
+1. Create a Supabase project and open **SQL Editor**.
+2. Run [`schema.sql`](./schema.sql) to create pharmacy-scoped inventory, batch, stock-ledger, transaction, and benchmark tables, RLS policies, and the stock mutation functions.
+3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for browser-side Supabase Auth.
+4. Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SESSION_SECRET` (at least 32 random characters), and `MANAGER_APPROVAL_PASSWORD` only in the Express server environment.
+5. Disable public Supabase Auth signups. New users are provisioned through the manager-approved Express endpoint and then sign in normally.
 
-## 2. Environment Variables (.env)
-Add your Supabase credentials to `.env`:
-```env
-VITE_SUPABASE_URL=https://your-project-id.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-public-key
-```
+The service-role key bypasses RLS, so it must remain server-side. Express authorizes every request using its signed HttpOnly session cookie and scopes each data query to the signed-in user's pharmacy. The SQL migration drops public inventory policies from the earlier prototype; old records without an owner are not visible to application users.
 
-## 3. GitHub & VS Code Compatibility
-This repository is configured with:
-- Standard Vite + React 19 + TypeScript configuration
-- Full `.gitignore` covering `node_modules`, `.env`, build artifacts
-- Express backend in `server.ts` with API proxy routes
-- Clean architecture separating UI, store, API services, and database scripts
+See the project [README](../README.md) for development and test commands.

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
 import { OnboardingScreen } from '../components/screens/OnboardingScreen';
+import { apiGet, apiPost } from '../services/api';
 
 export type InventorySize = 'small' | 'medium' | 'large';
 export type StockCategory =
@@ -36,8 +36,6 @@ export const useProfile = () => {
   return ctx;
 };
 
-const COLUMNS = 'id, name, manager_name, inventory_size, stock_categories';
-
 export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNode }> = ({ userId, children }) => {
   const [profile, setProfile] = useState<PharmacyProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,14 +44,12 @@ export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNo
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const { data, error: err } = await supabase
-      .from('pharmacies')
-      .select(COLUMNS)
-      .eq('owner_id', userId)
-      .maybeSingle();
-
-    if (err) setError('We could not load your pharmacy. Check your connection and try again.');
-    else setProfile(data as PharmacyProfile | null);
+    try {
+      const { profile: data } = await apiGet<{ profile: PharmacyProfile | null }>('/api/pharmacy');
+      setProfile(data);
+    } catch {
+      setError('We could not load your pharmacy. Check your connection and try again.');
+    }
     setLoading(false);
   }, [userId]);
 
@@ -62,14 +58,8 @@ export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNo
   }, [load]);
 
   const saveProfile = async (input: NewProfile) => {
-    const { data, error: err } = await supabase
-      .from('pharmacies')
-      .insert({ ...input, owner_id: userId })
-      .select(COLUMNS)
-      .single();
-
-    if (err) throw new Error('We could not save your pharmacy. Please try again.');
-    setProfile(data as PharmacyProfile);
+    const { profile: data } = await apiPost<{ profile: PharmacyProfile }>('/api/pharmacy', input);
+    setProfile(data);
   };
 
   return (

@@ -13,32 +13,49 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
   const [presentation, setPresentation] = useState('Solid Oral');
   const [category, setCategory] = useState('Analgesic');
   const [unit, setUnit] = useState('tabs');
-  const [minThreshold, setMinThreshold] = useState<number | string>(200);
-  const [shelfLocation, setShelfLocation] = useState('Shelf B-02-A');
-  const [costPriceGhc, setCostPriceGhc] = useState<number | string>(0.50);
-  const [sellingPriceGhc, setSellingPriceGhc] = useState<number | string>(0.90);
-  const [initialQuantity, setInitialQuantity] = useState<number | string>(500);
+  const [minThreshold, setMinThreshold] = useState<number | string>(0);
+  const [shelfLocation, setShelfLocation] = useState('');
+  const [costPriceGhc, setCostPriceGhc] = useState<number | string>('');
+  const [sellingPriceGhc, setSellingPriceGhc] = useState<number | string>('');
+  const [initialQuantity, setInitialQuantity] = useState<number | string>(0);
   const [initialBatchNo, setInitialBatchNo] = useState(`BAT-${new Date().getFullYear()}-01`);
+  const [initialExpiryDate, setInitialExpiryDate] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
-
-    addNewItem({
-      name: name.trim(),
-      presentation,
-      category,
-      unit,
-      minThreshold: Number(minThreshold),
-      shelfLocation,
-      formDescription: `${presentation} pack`,
-      costPriceGhc: Number(costPriceGhc),
-      sellingPriceGhc: Number(sellingPriceGhc),
-      initialQuantity: Number(initialQuantity),
-      initialBatchNo,
-    });
-
-    onClose();
+    if (!name.trim()) {
+      setError('Enter the medicine name.');
+      return;
+    }
+    if (Number(initialQuantity) > 0 && (!initialBatchNo.trim() || !initialExpiryDate)) {
+      setError('Enter the opening batch number and expiry date when adding opening stock.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await addNewItem({
+        name: name.trim(),
+        presentation,
+        category,
+        unit,
+        minThreshold: Number(minThreshold),
+        shelfLocation,
+        formDescription: `${presentation} pack`,
+        costPriceGhc: Number(costPriceGhc),
+        sellingPriceGhc: Number(sellingPriceGhc),
+        initialQuantity: Number(initialQuantity),
+        initialBatchNo,
+        initialExpiryDate,
+      });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not add this medicine.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -118,7 +135,9 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
               <label className="block text-xs font-bold text-slate-700 mb-1">Minimum Safety Reorder Level</label>
               <input
                 type="number"
-                min="1"
+                min="0"
+                step="1"
+                required
                 value={minThreshold}
                 onChange={(e) => setMinThreshold(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -144,6 +163,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
                 type="number"
                 step="0.01"
                 min="0"
+                required
                 value={costPriceGhc}
                 onChange={(e) => setCostPriceGhc(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -156,6 +176,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
                 type="number"
                 step="0.01"
                 min="0"
+                required
                 value={sellingPriceGhc}
                 onChange={(e) => setSellingPriceGhc(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -188,8 +209,21 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
                   className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs font-mono uppercase"
                 />
               </div>
+              <div className="col-span-2">
+                <label className="block text-[11px] text-slate-600 mb-1">Expiry date {Number(initialQuantity) > 0 ? '(required)' : '(optional)'}</label>
+                <input
+                  type="date"
+                  value={initialExpiryDate}
+                  onChange={(e) => setInitialExpiryDate(e.target.value)}
+                  required={Number(initialQuantity) > 0}
+                  min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded text-xs"
+                />
+              </div>
             </div>
           </div>
+
+          {error && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
 
           {/* Footer buttons */}
           <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
@@ -202,9 +236,10 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-bold text-white bg-[#197882] hover:bg-[#14646D] rounded-lg shadow-sm"
+              disabled={saving}
+              className="px-5 py-2 text-xs font-bold text-white bg-[#197882] hover:bg-[#14646D] rounded-lg shadow-sm disabled:opacity-60"
             >
-              Save Formulary Item
+              {saving ? 'Saving…' : 'Save Formulary Item'}
             </button>
           </div>
         </form>

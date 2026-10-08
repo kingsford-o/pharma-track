@@ -27,7 +27,7 @@ const navItems: { id: ActiveScreen; label: string; icon: React.ElementType }[] =
 ];
 
 export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) => {
-  const { activeScreen, setActiveScreen, setIsSchemaModalOpen } = usePharmacy();
+  const { activeScreen, setActiveScreen, setIsSchemaModalOpen, isSupabaseConnected } = usePharmacy();
   const { profile } = useProfile();
   const visibleNavItems = profile?.stock_categories.includes('controlled_drugs')
     ? [...navItems, { id: 'controlled-register' as const, label: 'Controlled drug register', icon: ClipboardList }]
@@ -108,8 +108,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
         {/* Footer: plain-language status first, dev tools tucked away */}
         <div className="space-y-3 border-t border-slate-100 p-4">
           <div className="flex items-center gap-2 text-xs font-medium text-slate-600">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            All changes saved
+            <span className={`h-2 w-2 rounded-full ${isSupabaseConnected ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+            {isSupabaseConnected ? 'Cloud data connected' : 'Server sync unavailable'}
           </div>
           <button
             onClick={() => setIsSchemaModalOpen(true)}

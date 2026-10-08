@@ -17,6 +17,7 @@ export const DispenseScreen: React.FC = () => {
   const { profile } = useProfile();
   const { 
     items, 
+    ledger,
     selectedItemId, 
     setSelectedItemId, 
     dispenseStock, 
@@ -26,23 +27,34 @@ export const DispenseScreen: React.FC = () => {
   const currentItem = items.find(i => i.id === selectedItemId) || items[0];
 
   // Dispense Form state
-  const [quantityToDispense, setQuantityToDispense] = useState<number | string>(500); // Default from screenshot showing 500
-  const [referenceNo, setReferenceNo] = useState('RX-2026-9814 (Outpatient OPD)');
+  const [quantityToDispense, setQuantityToDispense] = useState<number | string>('');
+  const [referenceNo, setReferenceNo] = useState('');
   const [prescriberName, setPrescriberName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const reqQty = Number(quantityToDispense) || 0;
-  const availableBalance = currentItem?.currentBalance || 0;
+  const today = new Date().toISOString().slice(0, 10);
+  const eligibleBatches = currentItem?.batches.filter((batch) => batch.currentQuantity > 0 && batch.expiryDate > today) ?? [];
+  const availableBalance = eligibleBatches.reduce((sum, batch) => sum + batch.currentQuantity, 0);
   const isShortfall = reqQty > availableBalance;
   const shortfallAmount = reqQty - availableBalance;
   const requiresPrescriber = profile?.stock_categories.includes('prescription_medicines') ?? false;
 
   // Auto-Ranked FEFO Batch allocation simulation
   // Batches ordered by expiry date
-  const sortedBatches = currentItem ? [...currentItem.batches].sort(
+  const sortedBatches = [...eligibleBatches].sort(
     (a, b) => new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime()
-  ) : [];
+  );
+  const recentDispenses = ledger.filter((entry) => entry.itemId === currentItem?.id && entry.type === 'Dispensed').slice(0, 5);
+  const currentMonth = new Date();
+  const monthToDateIssues = ledger
+    .filter((entry) => entry.itemId === currentItem?.id && entry.type === 'Dispensed')
+    .filter((entry) => {
+      const date = new Date(entry.rawDate);
+      return date.getFullYear() === currentMonth.getFullYear() && date.getMonth() === currentMonth.getMonth();
+    })
+    .reduce((sum, entry) => sum + (entry.qtyOut ?? 0), 0);
 
   let remaining = reqQty;
   const allocations = sortedBatches.map((batch, index) => {
@@ -96,20 +108,31 @@ export const DispenseScreen: React.FC = () => {
       quantityToDispense: reqQty,
       referenceNo: referenceNo.trim(),
       prescriberName: requiresPrescriber ? prescriberName.trim() : undefined,
-      destinationOrPatient: referenceNo.includes('OPD') ? 'Outpatient Dispensary (OPD)' : 'Clinical Ward',
-      recordedBy: 'S. Jenkins, Pharmacist',
+      destinationOrPatient: 'Dispensary',
     });
 
     setSubmitting(false);
 
     if (res.success) {
       setStatusMessage({ type: 'success', text: res.message });
-      setQuantityToDispense(100);
-      setReferenceNo(`RX-2026-${Math.floor(Math.random() * 8000 + 1000)} (Direct OPD)`);
+      setQuantityToDispense('');
+      setReferenceNo('');
     } else {
       setStatusMessage({ type: 'error', text: res.message });
     }
   };
+
+  if (!currentItem) {
+    return (
+      <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-8 text-center">
+        <h1 className="text-xl font-bold text-slate-900">No inventory items to dispense</h1>
+        <p className="mt-2 text-sm text-slate-500">Add a medicine and record its actual batch before recording a dispense.</p>
+        <button onClick={() => setActiveScreen('inventory')} className="mt-5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+          Open inventory
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto pb-12">
@@ -285,7 +308,7 @@ export const DispenseScreen: React.FC = () => {
                   required
                   value={referenceNo}
                   onChange={(e) => setReferenceNo(e.target.value)}
-                  placeholder="e.g. RX-2026-9814 (Outpatient OPD)"
+                  placeholder="Enter prescription or ward requisition reference"
                   className="w-full py-2.5 pl-3.5 pr-10 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
                 />
                 <ShieldCheck className="w-4 h-4 text-emerald-600 absolute right-3 top-1/2 -translate-y-1/2" />
@@ -436,106 +459,36 @@ export const DispenseScreen: React.FC = () => {
                 <h2 className="text-sm font-bold text-slate-900">Recent Dispenses</h2>
               </div>
               <span className="text-xs font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                4 Records
+                {recentDispenses.length} Records
               </span>
             </div>
 
-            <div className="space-y-3">
-              {/* Record 1 */}
-              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/60">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-900">
-                    Outpatient Dispensary (OPD #1098)
-                  </span>
-                  <span className="font-mono font-bold text-rose-600">
-                    -100 tabs
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 mb-1.5">
-                  Post-discharge ambulatory issue
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>PRC-26H14 · Exp: 15/11/2026</span>
-                  <span className="text-slate-600 font-medium">01/10/2026</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  Recorded by: S. Jenkins, Pharmacist
-                </div>
-              </div>
-
-              {/* Record 2 */}
-              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/60">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-900">
-                    Ward 3 Clinic Transfer
-                  </span>
-                  <span className="font-mono font-bold text-rose-600">
-                    -60 tabs
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 mb-1.5">
-                  Internal Requisition #W3-902
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>PRC-26H14 · Exp: 15/11/2026</span>
-                  <span className="text-slate-600 font-medium">30/09/2026</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  Recorded by: K. Mensah, Dispenser
-                </div>
-              </div>
-
-              {/* Record 3 */}
-              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/60">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-900">
-                    Community Prescription #7731
-                  </span>
-                  <span className="font-mono font-bold text-rose-600">
-                    -100 tabs
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 mb-1.5">
-                  Direct ambulatory chronic care issue
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>PRC-26H14 · Exp: 15/11/2026</span>
-                  <span className="text-slate-600 font-medium">28/09/2026</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  Recorded by: M. Davis, Dispenser
-                </div>
-              </div>
-
-              {/* Record 4 */}
-              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/60">
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold text-slate-900">
-                    Adult Medical Ward Requisition
-                  </span>
-                  <span className="font-mono font-bold text-rose-600">
-                    -200 tabs
-                  </span>
-                </div>
-                <div className="text-[11px] text-slate-500 mb-1.5">
-                  Requisition Ref: #AMW-441
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>PRC-26H14 · Exp: 15/11/2026</span>
-                  <span className="text-slate-600 font-medium">25/09/2026</span>
-                </div>
-                <div className="text-[10px] text-slate-500 mt-1">
-                  Recorded by: A. Patel, Pharmacist
-                </div>
-              </div>
-            </div>
+            {recentDispenses.length === 0 ? (
+              <p className="py-6 text-center text-sm text-slate-500">No dispenses have been recorded for this medicine.</p>
+            ) : (
+              <ul className="space-y-3">
+                {recentDispenses.map((entry) => (
+                  <li key={entry.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate font-semibold text-slate-900">{entry.supplierOrCustomer || 'Dispense'}</span>
+                      <span className="shrink-0 font-mono font-bold text-rose-600">-{entry.qtyOut ?? 0} {currentItem.unit}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500">{entry.referenceDetails || 'No reference provided'}</p>
+                    <div className="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                      <span>{entry.batchNo || 'Batch not recorded'}</span>
+                      <span>{entry.date}</span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Bin Card Health Metric Card */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm text-xs">
             <div className="text-slate-400 font-bold uppercase tracking-wider text-[10px] mb-2 flex items-center justify-between">
               <span>BIN CARD HEALTH METRIC</span>
-              <span className="font-mono text-slate-600">PCM-500 TAB</span>
+              <span className="font-mono text-slate-600">{currentItem.sku}</span>
             </div>
             <div className="grid grid-cols-2 gap-3 pt-1">
               <div>
@@ -547,7 +500,7 @@ export const DispenseScreen: React.FC = () => {
               <div>
                 <div className="text-[11px] text-slate-500">Month-to-Date Issues</div>
                 <div className="text-lg font-extrabold text-slate-900 font-mono tabular-nums">
-                  100 {currentItem?.unit}
+                  {monthToDateIssues} {currentItem.unit}
                 </div>
               </div>
             </div>

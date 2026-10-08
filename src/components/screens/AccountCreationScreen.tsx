@@ -47,7 +47,9 @@ export const AccountCreationScreen: React.FC<AccountCreationScreenProps> = ({ on
         </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>
-        <p className="mt-1.5 text-sm text-slate-500">Ask your manager for the approval password to get started.</p>
+        <p className="mt-1.5 text-sm text-slate-500">
+          Create your own sign-in password, then enter the manager approval password to authorize your account.
+        </p>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-4">
           <div>
@@ -87,6 +89,7 @@ export const AccountCreationScreen: React.FC<AccountCreationScreenProps> = ({ on
               onChange={(event) => setApprovalPassword(event.target.value)}
               className={inputClass}
             />
+            <p className="mt-1 text-xs text-slate-500">Ask your manager for this password. It is not your sign-in password.</p>
           </div>
 
           {error && (

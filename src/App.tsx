@@ -7,6 +7,7 @@ import { ReceiveStockScreen } from './components/screens/ReceiveStockScreen';
 import { DispenseScreen } from './components/screens/DispenseScreen';
 import { InventoryScreen } from './components/screens/InventoryScreen';
 import { BinCardScreen } from './components/screens/BinCardScreen';
+import { OperationsScreen } from './components/screens/OperationsScreen';
 import { SupabaseModal } from './components/SupabaseModal';
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
 
@@ -55,9 +56,9 @@ const MainLayout: React.FC = () => {
           {activeScreen === 'inventory' && <InventoryScreen />}
           {activeScreen === 'bincard' && <BinCardScreen />}
           {activeScreen === 'controlled-register' && <BinCardScreen controlledRegister />}
-          {activeScreen === 'sales' && <div className="text-center py-20 text-slate-500">Sales & Business - Coming Soon</div>}
-          {activeScreen === 'finance' && <div className="text-center py-20 text-slate-500">Finance & Accounts - Coming Soon</div>}
-          {activeScreen === 'reconciliation' && <div className="text-center py-20 text-slate-500">Reconciliation - Coming Soon</div>}
+          {activeScreen === 'sales' && <OperationsScreen view="sales" />}
+          {activeScreen === 'finance' && <OperationsScreen view="finance" />}
+          {activeScreen === 'reconciliation' && <OperationsScreen view="reconciliation" />}
         </main>
       </div>
 

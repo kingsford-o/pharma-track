@@ -34,17 +34,18 @@ export interface FormularyItem {
 
 export interface LedgerTransaction {
   id: string;
-  date: string; // "01 Oct 2026"
+  itemId: string;
+  date: string;
   rawDate: string;
   type: TransactionType;
-  supplierOrCustomer: string; // e.g. "PrimeCare Wholesale Ltd" or "Outpatient Dispensary (OPD #1098)"
+  supplierOrCustomer: string;
   referenceDetails?: string; // "GRN #PRC-77192" or "Requisition #W3-8820"
   batchNo: string;
   expiryLabel: string; // "Nov 2026"
   qtyIn: number | null;
   qtyOut: number | null;
   balanceAfter: number;
-  recordedBy: string; // "S. Jenkins, Pharmacist"
+  recordedBy: string;
   isHighlight?: boolean;
   isBreachAlert?: boolean;
 }

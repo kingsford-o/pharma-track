@@ -3,6 +3,7 @@ import { Search, Building2, ChevronDown, Menu, Database, LogOut } from 'lucide-r
 import { usePharmacy } from '../context/PharmacyContext';
 import { useProfile } from '../context/ProfileContext';
 import { supabase } from '../lib/supabaseClient';
+import { apiRequest } from '../services/api';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -28,6 +29,18 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const searchRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const signOut = async () => {
+    try {
+      await apiRequest<void>('/api/auth/session', { method: 'DELETE' });
+      const { error } = await supabase.auth.signOut();
+      if (error) throw error;
+      window.location.reload();
+    } catch (error) {
+      console.error('Could not complete secure sign-out:', error);
+      window.alert('Secure sign-out could not be completed. Check your connection and try again.');
+    }
+  };
 
   useClickOutside(searchRef, () => setSearchOpen(false));
   useClickOutside(userRef, () => setUserOpen(false));
@@ -182,7 +195,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
                   Database schema
                 </button>
                 <button
-                  onClick={() => supabase.auth.signOut()}
+                  onClick={() => void signOut()}
                   className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
                 >
                   <LogOut className="h-4 w-4" />

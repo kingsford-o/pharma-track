@@ -14,15 +14,18 @@ import { AddItemModal } from '../AddItemModal';
 
 type FilterTab = 'all' | 'low_stock' | 'expiring_soon' | 'out_of_stock';
 
+const isExpiringSoon = (item: { batches: { currentQuantity: number; expiryDaysLeft: number }[] }) =>
+  item.batches.some((batch) => batch.currentQuantity > 0 && batch.expiryDaysLeft >= 0 && batch.expiryDaysLeft <= 90);
+
 export const InventoryScreen: React.FC = () => {
-  const { items, setSelectedItemId, setActiveScreen } = usePharmacy();
+  const { items, setSelectedItemId, setActiveScreen, syncTimestamp } = usePharmacy();
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   // Dynamic counts
   const lowStockCount = items.filter(i => i.currentBalance > 0 && i.currentBalance <= i.minThreshold).length;
-  const expiringCount = items.filter(i => i.status === 'Expiring soon' || i.batches.some(b => b.currentQuantity > 0 && b.expiryDaysLeft <= 90)).length;
+  const expiringCount = items.filter(isExpiringSoon).length;
   const outOfStockCount = items.filter(i => i.currentBalance === 0).length;
 
   // Calculate Total Stock Value at Cost
@@ -46,7 +49,7 @@ export const InventoryScreen: React.FC = () => {
       return item.currentBalance > 0 && item.currentBalance <= item.minThreshold;
     }
     if (activeTab === 'expiring_soon') {
-      return item.status === 'Expiring soon' || item.batches.some(b => b.currentQuantity > 0 && b.expiryDaysLeft <= 90);
+      return isExpiringSoon(item);
     }
     if (activeTab === 'out_of_stock') {
       return item.currentBalance === 0;
@@ -281,7 +284,7 @@ export const InventoryScreen: React.FC = () => {
         <div className="p-3 sm:px-6 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span>Clinical Date: 01/10/2026 · Audit compliant: FEFO automated prioritization active</span>
+            <span>{syncTimestamp ? `Synced ${syncTimestamp}` : 'Inventory sync pending'} · FEFO batch allocation active</span>
           </div>
           <div>
             Showing {filteredItems.length} of {items.length} cataloged formulary items

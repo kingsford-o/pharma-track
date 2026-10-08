@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { apiGet } from '../services/api';
 
 export type TxType = 'sale' | 'purchase' | 'receipt';
 
@@ -90,37 +90,30 @@ export function useDashboardData(pharmacyId: string | undefined) {
     const now = new Date();
     const since = new Date(now.getFullYear(), now.getMonth() - 1, 1); // start of last month
 
-    const { data, error: err } = await supabase
-      .from('transactions')
-      .select('id, type, item_name, quantity, amount, created_at')
-      .eq('pharmacy_id', pharmacyId)
-      .gte('created_at', since.toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1000);
-
-    if (err) setError('We could not load your latest numbers.');
-    else {
+    try {
+      const { transactions } = await apiGet<{ transactions: Tx[] }>(
+        `/api/transactions?since=${encodeURIComponent(since.toISOString())}`,
+      );
       setError('');
-      setTxs((data ?? []) as Tx[]);
+      setTxs(transactions);
+      setLive(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'We could not load your latest numbers.');
+      setLive(false);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [pharmacyId]);
 
   useEffect(() => {
     if (!pharmacyId) return;
-    load();
-
-    const channel = supabase
-      .channel(`transactions-${pharmacyId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'transactions', filter: `pharmacy_id=eq.${pharmacyId}` },
-        () => load(),
-      )
-      .subscribe((status) => setLive(status === 'SUBSCRIBED'));
-
+    void load();
+    const refresh = () => void load();
+    window.addEventListener('focus', refresh);
+    const interval = window.setInterval(refresh, 60_000);
     return () => {
-      supabase.removeChannel(channel);
+      window.removeEventListener('focus', refresh);
+      window.clearInterval(interval);
     };
   }, [pharmacyId, load]);
 
