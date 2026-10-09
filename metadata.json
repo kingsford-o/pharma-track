@@ -1,5 +1,5 @@
 {
-  "name": "PharmAsyst Pharmacy Management System",
+  "name": "Axelle MD Pharmacy Management System",
   "description": "Clinical pharmacy dispensary and perpetual inventory ledger OS with FEFO batch allocation, stock reception, real-time market pricing verification, and bin card audit tracking.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

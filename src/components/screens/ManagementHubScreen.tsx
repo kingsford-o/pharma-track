@@ -255,7 +255,7 @@ export const ManagementHubScreen: React.FC<{ initialTab?: HubTab }> = ({ initial
     <div className="mx-auto max-w-7xl space-y-6 pb-12">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">PharmAsyst · Pharmacy operations</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-brand-700">Axelle MD · Pharmacy operations</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900">{PAGE_TITLES[tab]}</h1>
           <p className="mt-1 text-sm text-slate-500">Insights, safety, suppliers, patient records, staff access, and store locations.</p>
         </div>
@@ -408,7 +408,7 @@ export const ManagementHubScreen: React.FC<{ initialTab?: HubTab }> = ({ initial
             <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr]">
               <Panel title="Role-based access">
                 {profile?.role !== 'admin' ? <Empty>Administrator permission is required to manage staff roles.</Empty> : <>
-                  <p className="mb-4 text-sm text-slate-600">Assign roles to existing PharmAsyst accounts. Staff must create an account before they can be added.</p>
+                  <p className="mb-4 text-sm text-slate-600">Assign roles to existing Axelle MD accounts. Staff must create an account before they can be added.</p>
                   <div className="mb-5 space-y-3">{[
                     ['Pharmacist', 'Patient records, prescriptions, stock, and safety'],
                     ['Cashier', 'Sales and read-only operational summaries'],
@@ -560,7 +560,7 @@ export const ManagementHubScreen: React.FC<{ initialTab?: HubTab }> = ({ initial
                 <section className="print-output" aria-label="Product SKU label">
                   <h2 className="text-base font-bold">{labelItem.name}</h2>
                   <p className="mt-2 font-mono text-sm">SKU / barcode: {labelItem.sku}</p>
-                  <p className="mt-1 text-xs">PharmAsyst inventory label</p>
+                  <p className="mt-1 text-xs">Axelle MD inventory label</p>
                 </section>
                 <button onClick={() => window.print()} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold print:hidden">Print SKU label</button>
                 </div>}

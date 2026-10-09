@@ -73,6 +73,16 @@ function validDateOnly(value: unknown): value is string {
 
 const profileColumns = 'id, owner_id, name, manager_name, inventory_size, stock_categories';
 
+function logPharmacyLookupFailure(error: { code?: string; message: string; details?: string; hint?: string }) {
+  const cause = error.details?.split(/\r?\n/).find((line) => line.startsWith('Caused by: '));
+  console.error('Pharmacy lookup failed:', {
+    message: error.message,
+    ...(error.code ? { code: error.code } : {}),
+    ...(cause ? { cause } : {}),
+    ...(error.hint ? { hint: error.hint } : {}),
+  });
+}
+
 export function createApiApp(dependencies: ApiDependencies = {}) {
   const app = express();
   const serverSupabaseUrl = process.env.SUPABASE_URL?.trim();
@@ -179,7 +189,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   async function requirePharmacy(userId: string, res: Response) {
     const { data, error } = await pharmacyForUser(userId);
     if (error) {
-      console.error('Pharmacy lookup failed:', error.message);
+      logPharmacyLookupFailure(error);
       res.status(500).json({ error: 'We could not load your pharmacy profile.' });
       return null;
     }
@@ -220,7 +230,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     }
   };
 
-  app.get('/api/health', (_req, res) => res.json({ status: 'online', app: 'PharmaTrack' }));
+  app.get('/api/health', (_req, res) => res.json({ status: 'online', app: 'Axelle MD' }));
 
   app.post('/api/auth/session', requireConfiguration, async (req, res, next) => {
     try {
@@ -315,7 +325,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     try {
       const { data, error } = await pharmacyForUser(res.locals.userId as string);
       if (error) {
-        console.error('Pharmacy lookup failed:', error.message);
+        logPharmacyLookupFailure(error);
         res.status(500).json({ error: 'We could not load your pharmacy profile.' });
         return;
       }

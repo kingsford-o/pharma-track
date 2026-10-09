@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { after, before, test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createPharmaTrackApp } from '../server/app';
-import deploymentApp from '../server';
+import deploymentHandler from '../api/[...path]';
 
 const pharmacies = [
   { id: 'pharmacy-a', owner_id: 'user-a', name: 'A Pharmacy', manager_name: 'Manager A', inventory_size: 'small', stock_categories: ['over_the_counter'] },
@@ -192,11 +193,13 @@ test('unknown API routes return JSON instead of the SPA HTML fallback', async ()
 });
 
 test('deployment entry point routes nested session requests to the Express API', async () => {
-  const deploymentServer = deploymentApp.listen(0, '127.0.0.1');
-  await new Promise<void>((resolve) => deploymentServer.once('listening', resolve));
+  const deploymentServer = createServer(deploymentHandler);
+  await new Promise<void>((resolve) => deploymentServer.listen(0, '127.0.0.1', resolve));
   const address = deploymentServer.address() as AddressInfo;
   try {
-    const response = await fetch(`http://127.0.0.1:${address.port}/api/auth/session`);
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/auth/session`, {
+      headers: { Connection: 'close' },
+    });
     assert.match(response.headers.get('content-type') ?? '', /application\/json/);
     assert.ok(response.status === 401 || response.status === 503);
     assert.equal(typeof (await response.json() as { error?: unknown }).error, 'string');

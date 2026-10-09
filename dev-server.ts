@@ -33,7 +33,7 @@ async function setupApp() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[PharmaTrack] Server listening on http://0.0.0.0:${PORT}`);
+    console.log(`[Axelle MD] Server listening on http://0.0.0.0:${PORT}`);
   });
 }
 

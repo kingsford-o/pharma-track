@@ -93,7 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
                 </svg>
               </div>
               <div>
-                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">PharmAsyst</div>
+                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">Axelle MD</div>
                 <div className="text-[11px] font-medium text-slate-500">Pharmacy management system</div>
               </div>
             </div>

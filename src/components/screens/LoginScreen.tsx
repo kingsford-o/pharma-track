@@ -66,7 +66,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPass
               </svg>
             </div>
             <div>
-              <div className="text-2xl font-bold tracking-tight text-slate-900">PharmAsyst</div>
+              <div className="text-2xl font-bold tracking-tight text-slate-900">Axelle MD</div>
               <div className="text-sm font-medium text-slate-500">Pharmacy management</div>
             </div>
           </div>

@@ -1,6 +1,6 @@
-# PharmAsyst
+# Axelle MD
 
-PharmAsyst is a pharmacy management system for Ghanaian pharmacies. It uses React, TypeScript, Express, and Supabase PostgreSQL. Pharmacy profiles, inventory, batches, dispensing, and financial records are persisted in Supabase; the dashboard does not load sample sales or sample stock.
+Axelle MD is a pharmacy management system for Ghanaian pharmacies. It uses React, TypeScript, Express, and Supabase PostgreSQL. Pharmacy profiles, inventory, batches, dispensing, and financial records are persisted in Supabase; the dashboard does not load sample sales or sample stock.
 
 ## Run locally
 
@@ -39,7 +39,7 @@ PharmAsyst is a pharmacy management system for Ghanaian pharmacies. It uses Reac
 
 If the app shows **“Secure API setup is incomplete”**, confirm the server has `SUPABASE_URL` (or `VITE_SUPABASE_URL`), `SUPABASE_SERVICE_ROLE_KEY`, and a `SESSION_SECRET` containing at least 32 characters. After changing `.env`, stop and restart `npm run dev`. Get the service-role/secret key from your Supabase project's API settings; do not use the public anon key for `SUPABASE_SERVICE_ROLE_KEY`.
 
-Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where the root `server.ts` Express app handles API requests and the Vite build in `dist` serves the frontend. The local server launcher is `dev-server.ts`; Vercel uses the root Express entry point so nested paths such as `/api/auth/session` reach the same API router. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
+Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where `api/[...path].ts` forwards API requests to the Express app while the Vite build in `dist` serves the frontend. Keep the Vercel `outputDirectory` set to `dist` so the static app and API function are both deployed. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
 
 ## Authentication and data protection
 
@@ -64,7 +64,7 @@ Deploy the Node/Express server and built React app together on a Node.js host, o
 
 The sidebar links directly to Data Insights, Safety Monitoring, Supplier Management, Access Control, Patient Management, Barcode Scanning, and Multi-Location Support. These open the corresponding tabs in the Management hub. The hub provides saved-data insights (inventory value, dispense velocity, and stock adjustments), expiry monitoring and recall blocking, supplier contacts and delivery tracking, threshold-based reorder suggestions, staff role assignment, patient/prescription history, multiple store/storage locations with location-specific receiving and dispensing plus auditable stock transfers, and barcode/SKU lookup with supported device-camera scanning. Dispenses can print a browser-formatted receipt, and inventory SKUs can print as labels.
 
-Run the updated [`supabase/schema.sql`](./supabase/schema.sql) migration before using the hub. Existing pharmacies receive a primary "Main store" location; existing batches are associated with it. New staff must first create a PharmAsyst account, after which an administrator can assign a role. The owner is the administrator. Patients and prescriptions are restricted to pharmacist and administrator roles; store patient information only as operationally necessary and follow applicable privacy, retention, and clinical record requirements. This feature set does not claim regulatory certification.
+Run the updated [`supabase/schema.sql`](./supabase/schema.sql) migration before using the hub. Existing pharmacies receive a primary "Main store" location; existing batches are associated with it. New staff must first create an Axelle MD account, after which an administrator can assign a role. The owner is the administrator. Patients and prescriptions are restricted to pharmacist and administrator roles; store patient information only as operationally necessary and follow applicable privacy, retention, and clinical record requirements. This feature set does not claim regulatory certification.
 
 Barcode scanning matches the scanned value to the item's SKU. Receipt and SKU-label printing use the browser print dialog; encoded barcode label artwork and printer-specific layouts are not included.
 
