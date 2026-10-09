@@ -3,23 +3,14 @@ import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApiApp } from './server/api';
-import { handleSignup } from './server/authSignup';
+import { createPharmaTrackApp } from './server/app';
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const app = createApiApp();
+const app = createPharmaTrackApp();
 const PORT = Number(process.env.PORT) || 3000;
-
-app.post('/api/auth/signup', (req, res, next) => {
-  handleSignup(req, res).catch((error: unknown) => {
-    console.error('Account creation request failed:', error);
-    if (!res.headersSent) res.status(500).json({ error: 'Account creation failed unexpectedly.' });
-    else next(error);
-  });
-});
 
 app.get('/api/supabase-schema', (_req, res) => {
   const schemaPath = path.resolve(__dirname, 'supabase', 'schema.sql');

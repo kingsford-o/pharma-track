@@ -16,6 +16,7 @@ export interface PharmacyProfile {
   manager_name: string;
   inventory_size: InventorySize;
   stock_categories: StockCategory[];
+  role?: 'admin' | 'pharmacist' | 'cashier' | 'inventory_clerk';
 }
 
 export type NewProfile = Omit<PharmacyProfile, 'id'>;
@@ -47,10 +48,11 @@ export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNo
     try {
       const { profile: data } = await apiGet<{ profile: PharmacyProfile | null }>('/api/pharmacy');
       setProfile(data);
-    } catch {
-      setError('We could not load your pharmacy. Check your connection and try again.');
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'We could not load your pharmacy. Check your connection and try again.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [userId]);
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export const ProfileProvider: React.FC<{ userId: string; children: React.ReactNo
 
   const saveProfile = async (input: NewProfile) => {
     const { profile: data } = await apiPost<{ profile: PharmacyProfile }>('/api/pharmacy', input);
-    setProfile(data);
+    setProfile({ ...data, role: data.role ?? 'admin' });
   };
 
   return (

@@ -8,8 +8,21 @@ import { DispenseScreen } from './components/screens/DispenseScreen';
 import { InventoryScreen } from './components/screens/InventoryScreen';
 import { BinCardScreen } from './components/screens/BinCardScreen';
 import { OperationsScreen } from './components/screens/OperationsScreen';
+import { ManagementHubScreen } from './components/screens/ManagementHubScreen';
+import type { HubTab } from './components/screens/ManagementHubScreen';
+import type { ActiveScreen } from './types/pharmacy';
 import { SupabaseModal } from './components/SupabaseModal';
 import { X, CheckCircle2, AlertCircle, Info } from 'lucide-react';
+
+const MANAGEMENT_TAB_BY_SCREEN: Partial<Record<ActiveScreen, HubTab>> = {
+  'management-insights': 'insights',
+  'management-safety': 'safety',
+  'management-suppliers': 'suppliers',
+  'management-access': 'access',
+  'management-patients': 'patients',
+  'management-locations': 'locations',
+  'management-barcode': 'barcode',
+};
 
 const MainLayout: React.FC = () => {
   const { activeScreen, notification, clearNotification } = usePharmacy();
@@ -59,6 +72,9 @@ const MainLayout: React.FC = () => {
           {activeScreen === 'sales' && <OperationsScreen view="sales" />}
           {activeScreen === 'finance' && <OperationsScreen view="finance" />}
           {activeScreen === 'reconciliation' && <OperationsScreen view="reconciliation" />}
+          {(activeScreen === 'management' || MANAGEMENT_TAB_BY_SCREEN[activeScreen]) && (
+            <ManagementHubScreen initialTab={MANAGEMENT_TAB_BY_SCREEN[activeScreen] ?? 'insights'} />
+          )}
         </main>
       </div>
 

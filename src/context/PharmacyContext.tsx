@@ -5,6 +5,7 @@ import { useProfile } from './ProfileContext';
 
 interface ReceiveStockParams {
   itemId: string;
+  locationId?: string;
   supplier: string;
   batchNo: string;
   expiryDate: string;
@@ -17,6 +18,7 @@ interface ReceiveStockParams {
 
 interface DispenseStockParams {
   itemId: string;
+  locationId?: string;
   quantityToDispense: number;
   referenceNo: string;
   destinationOrPatient: string;

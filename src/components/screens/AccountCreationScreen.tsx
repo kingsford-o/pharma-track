@@ -30,6 +30,7 @@ export const AccountCreationScreen: React.FC<AccountCreationScreenProps> = ({ on
       await onSubmit(email.trim(), password, approvalPassword);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'We could not create your account. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -43,7 +44,7 @@ export const AccountCreationScreen: React.FC<AccountCreationScreenProps> = ({ on
               <path d="M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6V4z" />
             </svg>
           </div>
-          <div className="text-lg font-bold text-slate-900">Axelle MD</div>
+          <div className="text-lg font-bold text-slate-900">PharmAsyst</div>
         </div>
 
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Create your account</h1>

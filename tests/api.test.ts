@@ -3,18 +3,33 @@ import { after, before, test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { createApiApp } from '../server/api';
+import { createPharmaTrackApp } from '../server/app';
 
 const pharmacies = [
   { id: 'pharmacy-a', owner_id: 'user-a', name: 'A Pharmacy', manager_name: 'Manager A', inventory_size: 'small', stock_categories: ['over_the_counter'] },
   { id: 'pharmacy-b', owner_id: 'user-b', name: 'B Pharmacy', manager_name: 'Manager B', inventory_size: 'large', stock_categories: ['prescription_medicines'] },
 ];
+const staff = [
+  { id: 'staff-c', pharmacy_id: 'pharmacy-a', user_id: 'user-c', email: 'cashier@example.test', role: 'cashier', active: true },
+];
+const userProfile = {
+  id: 'user-a',
+  email: 'manager@example.test',
+  full_name: 'Manager A',
+  created_at: '2025-01-01T00:00:00.000Z',
+  updated_at: '2025-01-01T00:00:00.000Z',
+};
 
 function mockSupabase() {
   return {
     from: (table: string) => ({
       filters: {} as Record<string, unknown>,
+      updates: {} as Record<string, unknown>,
       select() {
+        return this;
+      },
+      update(values: Record<string, unknown>) {
+        this.updates = values;
         return this;
       },
       eq(column: string, value: unknown) {
@@ -22,8 +37,15 @@ function mockSupabase() {
         return this;
       },
       async maybeSingle() {
-        const row = table === 'pharmacies'
+        if (table === 'user_profiles' && this.filters.id === userProfile.id) {
+          Object.assign(userProfile, this.updates);
+        }
+        const row = table === 'user_profiles'
+          ? (userProfile.id === this.filters.id ? userProfile : null)
+          : table === 'pharmacies'
           ? pharmacies.find((pharmacy) => Object.entries(this.filters).every(([key, value]) => pharmacy[key as keyof typeof pharmacy] === value)) ?? null
+          : table === 'pharmacy_staff'
+            ? staff.find((member) => Object.entries(this.filters).every(([key, value]) => member[key as keyof typeof member] === value)) ?? null
           : null;
         return { data: row, error: null };
       },
@@ -34,11 +56,40 @@ function mockSupabase() {
 let server: Server;
 let baseUrl: string;
 
-before(async () => {
-  const app = createApiApp({
+async function postWithSupabaseUrls(serverUrl: string, browserUrl: string) {
+  const previousServerUrl = process.env.SUPABASE_URL;
+  const previousBrowserUrl = process.env.VITE_SUPABASE_URL;
+  process.env.SUPABASE_URL = serverUrl;
+  process.env.VITE_SUPABASE_URL = browserUrl;
+  const app = createPharmaTrackApp({
     supabase: mockSupabase(),
     sessionSecret: 'test-only-session-secret-with-at-least-32-characters',
-    verifyAccessToken: async (token) => (token === 'valid-token-a' ? 'user-a' : token === 'valid-token-b' ? 'user-b' : null),
+    verifyAccessToken: async () => 'user-a',
+  });
+  if (previousServerUrl === undefined) delete process.env.SUPABASE_URL;
+  else process.env.SUPABASE_URL = previousServerUrl;
+  if (previousBrowserUrl === undefined) delete process.env.VITE_SUPABASE_URL;
+  else process.env.VITE_SUPABASE_URL = previousBrowserUrl;
+
+  const testServer = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => testServer.once('listening', resolve));
+  const address = testServer.address() as AddressInfo;
+  try {
+    return await fetch(`http://127.0.0.1:${address.port}/api/auth/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: 'valid-token-a' }),
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => testServer.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
+before(async () => {
+  const app = createPharmaTrackApp({
+    supabase: mockSupabase(),
+    sessionSecret: 'test-only-session-secret-with-at-least-32-characters',
+    verifyAccessToken: async (token) => (token === 'valid-token-a' ? 'user-a' : token === 'valid-token-b' ? 'user-b' : token === 'valid-token-c' ? 'user-c' : null),
   });
   server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -74,6 +125,48 @@ test('login rejects an invalid Supabase access token', async () => {
   assert.deepEqual(await response.json(), { error: 'Sign in failed. Verify your credentials and try again.' });
 });
 
+test('login reports a clear error when browser and server Supabase URLs differ', async () => {
+  const response = await postWithSupabaseUrls(
+    'https://server-project.supabase.co',
+    'https://browser-project.supabase.co',
+  );
+  assert.equal(response.status, 503);
+  assert.match((await response.json() as { error: string }).error, /different Supabase projects/);
+});
+
+test('login reports a clear error for malformed Supabase URLs', async () => {
+  const response = await postWithSupabaseUrls(
+    'not-a-url',
+    'https://browser-project.supabase.co',
+  );
+  assert.equal(response.status, 503);
+  assert.match((await response.json() as { error: string }).error, /Supabase URL configuration is invalid/);
+});
+
+test('users can read and update only their own user profile', async () => {
+  const login = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-a' }),
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+
+  const anonymous = await fetch(`${baseUrl}/api/users/me`);
+  assert.equal(anonymous.status, 401);
+
+  const profile = await fetch(`${baseUrl}/api/users/me`, { headers: { Cookie: cookie } });
+  assert.equal(profile.status, 200);
+  assert.equal((await profile.json() as { user: { email: string } }).user.email, 'manager@example.test');
+
+  const updated = await fetch(`${baseUrl}/api/users/me`, {
+    method: 'PATCH',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fullName: 'Updated Manager' }),
+  });
+  assert.equal(updated.status, 200);
+  assert.equal((await updated.json() as { user: { full_name: string } }).user.full_name, 'Updated Manager');
+});
+
 test('access control requires a session and scopes pharmacy reads to the session owner', async () => {
   const anonymous = await fetch(`${baseUrl}/api/pharmacy`);
   assert.equal(anonymous.status, 401);
@@ -91,3 +184,37 @@ test('access control requires a session and scopes pharmacy reads to the session
   assert.notEqual(result.profile?.owner_id, 'user-b');
 });
 
+test('unknown API routes return JSON instead of the SPA HTML fallback', async () => {
+  const response = await fetch(`${baseUrl}/api/unknown`);
+  assert.equal(response.status, 404);
+  assert.deepEqual(await response.json(), { error: 'API endpoint not found.' });
+});
+
+test('patient records reject anonymous requests', async () => {
+  const response = await fetch(`${baseUrl}/api/management/patients`);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: 'Sign in to continue.' });
+});
+
+test('staff role permissions block cashier access to administrator controls', async () => {
+  const login = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-c' }),
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+  const response = await fetch(`${baseUrl}/api/management/staff`, { headers: { Cookie: cookie } });
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: 'Your staff role does not have permission to perform this action.' });
+  const inventoryWrite = await fetch(`${baseUrl}/api/inventory`, {
+    method: 'POST',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(inventoryWrite.status, 403);
+  assert.deepEqual(await inventoryWrite.json(), { error: 'Your staff role does not have permission to perform this action.' });
+  const patientRecords = await fetch(`${baseUrl}/api/management/patients`, { headers: { Cookie: cookie } });
+  assert.equal(patientRecords.status, 403);
+  const managementRecords = await fetch(`${baseUrl}/api/management`, { headers: { Cookie: cookie } });
+  assert.equal(managementRecords.status, 403);
+});

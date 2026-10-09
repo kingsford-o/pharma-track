@@ -75,11 +75,32 @@ const profileColumns = 'id, owner_id, name, manager_name, inventory_size, stock_
 
 export function createApiApp(dependencies: ApiDependencies = {}) {
   const app = express();
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serverSupabaseUrl = process.env.SUPABASE_URL?.trim();
+  const browserSupabaseUrl = process.env.VITE_SUPABASE_URL?.trim();
+  const supabaseUrl = serverSupabaseUrl || browserSupabaseUrl;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const normalizeSupabaseOrigin = (value: string | undefined) => {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      if (!['https:', 'http:'].includes(url.protocol)) return null;
+      if (url.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(url.hostname)) return null;
+      return url.origin.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const invalidSupabaseUrl = [serverSupabaseUrl, browserSupabaseUrl]
+    .some((value) => Boolean(value && !normalizeSupabaseOrigin(value)));
+  const supabaseProjectMismatch = Boolean(
+    serverSupabaseUrl && browserSupabaseUrl &&
+    normalizeSupabaseOrigin(serverSupabaseUrl) &&
+    normalizeSupabaseOrigin(browserSupabaseUrl) &&
+    normalizeSupabaseOrigin(serverSupabaseUrl) !== normalizeSupabaseOrigin(browserSupabaseUrl),
+  );
   const supabase =
     dependencies.supabase ??
-    (supabaseUrl && serviceRoleKey
+    (supabaseUrl && serviceRoleKey && !invalidSupabaseUrl && !supabaseProjectMismatch
       ? createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
       : undefined);
   const sessionSecret = dependencies.sessionSecret ?? process.env.SESSION_SECRET;
@@ -98,6 +119,20 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
       if (!serviceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
     }
     if (!sessionSecret || sessionSecret.length < 32) missing.push('SESSION_SECRET (at least 32 characters)');
+    if (invalidSupabaseUrl) {
+      res.status(503).json({ error: 'Supabase URL configuration is invalid. Use a valid project URL, and use HTTPS outside local development.' });
+      return;
+    }
+    if (supabaseProjectMismatch) {
+      res.status(503).json({
+        error: 'The browser and server are configured for different Supabase projects. Set VITE_SUPABASE_URL and SUPABASE_URL to the same project, then restart the server.',
+      });
+      return;
+    }
+    if (!dependencies.supabase && supabaseUrl && serviceRoleKey && !supabase) {
+      res.status(503).json({ error: 'Supabase server configuration could not be initialized. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.' });
+      return;
+    }
     if (missing.length > 0) {
       res.status(503).json({
         error: `Secure API setup is incomplete. Add ${missing.join(' and ')} to the server .env file, then restart the server.`,
@@ -129,7 +164,16 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
 
   async function pharmacyForUser(userId: string) {
     if (!supabase) throw new Error('Database is not configured.');
-    return supabase.from('pharmacies').select(profileColumns).eq('owner_id', userId).maybeSingle();
+    const owned = await supabase.from('pharmacies').select(profileColumns).eq('owner_id', userId).maybeSingle();
+    if (owned.error || owned.data) return owned;
+    const membership = await supabase
+      .from('pharmacy_staff')
+      .select('pharmacy_id')
+      .eq('user_id', userId)
+      .eq('active', true)
+      .maybeSingle();
+    if (membership.error || !membership.data) return { data: null, error: membership.error };
+    return supabase.from('pharmacies').select(profileColumns).eq('id', membership.data.pharmacy_id).maybeSingle();
   }
 
   async function requirePharmacy(userId: string, res: Response) {
@@ -146,6 +190,36 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     return data;
   }
 
+  const requireRoles = (...roles: string[]) => async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      if (profile.owner_id === res.locals.userId) {
+        next();
+        return;
+      }
+      const { data, error } = await supabase!
+        .from('pharmacy_staff')
+        .select('role')
+        .eq('pharmacy_id', profile.id)
+        .eq('user_id', res.locals.userId)
+        .eq('active', true)
+        .maybeSingle();
+      if (error) {
+        console.error('Staff permission lookup failed:', error.message);
+        res.status(500).json({ error: 'We could not verify your staff permissions.' });
+        return;
+      }
+      if (!data || !roles.includes(data.role)) {
+        res.status(403).json({ error: 'Your staff role does not have permission to perform this action.' });
+        return;
+      }
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+
   app.get('/api/health', (_req, res) => res.json({ status: 'online', app: 'PharmaTrack' }));
 
   app.post('/api/auth/session', requireConfiguration, async (req, res, next) => {
@@ -161,7 +235,15 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         userId = await dependencies.verifyAccessToken(accessToken);
       } else if (supabase) {
         const { data, error } = await supabase.auth.getUser(accessToken);
-        if (!error && data.user) userId = data.user.id;
+        if (error) {
+          console.error('Supabase access-token verification failed:', error.message);
+          if ((error.status ?? 0) >= 500 || error.name === 'AuthRetryableFetchError') {
+            res.status(503).json({ error: 'Supabase could not verify your sign-in right now. Check server connectivity and try again.' });
+            return;
+          }
+        } else if (data.user) {
+          userId = data.user.id;
+        }
       }
       if (!userId) {
         res.status(401).json({ error: 'Sign in failed. Verify your credentials and try again.' });
@@ -178,6 +260,52 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     res.json({ authenticated: true, userId: res.locals.userId });
   });
 
+  app.get('/api/users/me', requireConfiguration, authenticate, async (_req, res, next) => {
+    try {
+      const { data, error } = await supabase!
+        .from('user_profiles')
+        .select('id, email, full_name, created_at, updated_at')
+        .eq('id', res.locals.userId)
+        .maybeSingle();
+      if (error) {
+        console.error('User profile loading failed:', error.message);
+        res.status(500).json({ error: 'We could not load your user profile. Apply the latest Supabase schema migration.' });
+        return;
+      }
+      if (!data) {
+        res.status(404).json({ error: 'Your profile is not synchronized yet. Re-run the Supabase schema migration.' });
+        return;
+      }
+      res.json({ user: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/users/me', requireConfiguration, authenticate, async (req, res, next) => {
+    try {
+      const body = isRecord(req.body) ? req.body : {};
+      if (!validText(body.fullName, 160)) {
+        res.status(400).json({ error: 'Enter a display name up to 160 characters.' });
+        return;
+      }
+      const { data, error } = await supabase!
+        .from('user_profiles')
+        .update({ full_name: body.fullName.trim(), updated_at: new Date().toISOString() })
+        .eq('id', res.locals.userId)
+        .select('id, email, full_name, created_at, updated_at')
+        .maybeSingle();
+      if (error || !data) {
+        if (error) console.error('User profile update failed:', error.message);
+        res.status(error ? 500 : 404).json({ error: 'We could not update your profile. Apply the latest Supabase schema migration.' });
+        return;
+      }
+      res.json({ user: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.delete('/api/auth/session', (_req, res) => {
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; ${clearCookieOptions}`);
     res.status(204).end();
@@ -191,7 +319,27 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         res.status(500).json({ error: 'We could not load your pharmacy profile.' });
         return;
       }
-      res.json({ profile: data });
+      if (!data) {
+        res.json({ profile: null });
+        return;
+      }
+      let role = 'admin';
+      if (data.owner_id !== res.locals.userId) {
+        const membership = await supabase!
+          .from('pharmacy_staff')
+          .select('role')
+          .eq('pharmacy_id', data.id)
+          .eq('user_id', res.locals.userId)
+          .eq('active', true)
+          .maybeSingle();
+        if (membership.error || !membership.data) {
+          if (membership.error) console.error('Staff role loading failed:', membership.error.message);
+          res.status(500).json({ error: 'We could not load staff permissions.' });
+          return;
+        }
+        role = membership.data.role;
+      }
+      res.json({ profile: { ...data, role } });
     } catch (error) {
       next(error);
     }
@@ -284,6 +432,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           status: currentBalance === 0 ? 'Out of stock' : currentBalance <= minThreshold ? 'Low stock' : expiresSoon ? 'Expiring soon' : 'In stock',
           batches: itemBatches.map((batch) => ({
           id: batch.id,
+          locationId: batch.location_id ?? null,
           batchNo: batch.batch_no,
           shelfLocation: batch.shelf_location,
           expiryDate: batch.expiry_date,
@@ -292,6 +441,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           currentQuantity: batch.current_quantity,
           costPriceGhc: Number(batch.cost_price_ghc),
           supplierName: batch.supplier_name,
+          isRecalled: Boolean(batch.is_recalled),
           })),
         };
       });
@@ -316,7 +466,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     }
   });
 
-  app.post('/api/inventory', requireConfiguration, authenticate, async (req, res, next) => {
+  app.post('/api/inventory', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
     try {
       const profile = await requirePharmacy(res.locals.userId as string, res);
       if (!profile) return;
@@ -374,7 +524,7 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
     }
   });
 
-  app.post('/api/inventory/:itemId/receive', requireConfiguration, authenticate, async (req, res, next) => {
+  app.post('/api/inventory/:itemId/receive', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
     try {
       const profile = await requirePharmacy(res.locals.userId as string, res);
       if (!profile) return;
@@ -389,7 +539,8 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         !validNumber(body.physicalCountBeforeReceipt) ||
         !Number.isInteger(body.physicalCountBeforeReceipt) ||
         !validNumber(body.costPriceGhc) ||
-        !validNumber(body.sellingPriceGhc)
+        !validNumber(body.sellingPriceGhc) ||
+        (body.locationId !== undefined && !validText(body.locationId, 80))
       ) {
         res.status(400).json({ error: 'Enter valid delivery, expiry, quantity, and price details.' });
         return;
@@ -406,27 +557,30 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         p_cost_price: body.costPriceGhc,
         p_selling_price: body.sellingPriceGhc,
         p_recorded_by: profile.manager_name,
+        p_location_id: typeof body.locationId === 'string' ? body.locationId : null,
       });
       if (error) {
         console.error('Stock receipt failed:', error.message);
         const message = error.message.toLowerCase();
-        const userMessage = error.code === 'P0002'
+        const userMessage = message.includes('location')
+          ? 'Choose a stock location belonging to this pharmacy.'
+          : error.code === 'P0002'
           ? 'This medicine is not in your pharmacy inventory.'
           : message.includes('physical count')
-            ? 'The entered physical count differs from the recorded balance. Reconcile stock before receiving this batch.'
+            ? 'The physical count differs from the recorded location balance. Reconcile stock before receiving this batch.'
             : message.includes('expiry')
               ? 'The expiry date must be in the future.'
               : 'We could not post this stock receipt. Check the quantity and batch details.';
         res.status(error.code === 'P0002' ? 404 : 400).json({ error: userMessage });
         return;
       }
-      res.json({ success: true, message: `Stock receipt recorded. Shelf balance is now ${data}.` });
+      res.json({ success: true, message: `Stock receipt recorded. Pharmacy-wide balance is now ${data}.` });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post('/api/inventory/:itemId/dispense', requireConfiguration, authenticate, async (req, res, next) => {
+  app.post('/api/inventory/:itemId/dispense', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'cashier'), async (req, res, next) => {
     try {
       const profile = await requirePharmacy(res.locals.userId as string, res);
       if (!profile) return;
@@ -436,7 +590,8 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         !validNumber(body.quantityToDispense, 1) ||
         !Number.isInteger(body.quantityToDispense) ||
         !validText(body.referenceNo, 100) ||
-        !validText(body.destinationOrPatient, 160)
+        !validText(body.destinationOrPatient, 160) ||
+        (body.locationId !== undefined && !validText(body.locationId, 80))
       ) {
         res.status(400).json({ error: 'Enter a valid dispensing quantity, reference, and destination.' });
         return;
@@ -453,11 +608,14 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         ].filter(Boolean).join(' · '),
         p_destination: body.destinationOrPatient.trim(),
         p_recorded_by: profile.manager_name,
+        p_location_id: typeof body.locationId === 'string' ? body.locationId : null,
       });
       if (error) {
         console.error('Stock dispensing failed:', error.message);
         const message = error.message.toLowerCase();
-        const userMessage = error.code === 'P0002'
+        const userMessage = message.includes('location')
+          ? 'Choose a stock location belonging to this pharmacy.'
+          : error.code === 'P0002'
           ? 'This medicine is not in your pharmacy inventory.'
           : message.includes('batch')
             ? 'Available unexpired batches do not cover this dispense. Reconcile the stock balance before retrying.'
@@ -465,7 +623,437 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         res.status(error.code === 'P0002' ? 404 : 400).json({ error: userMessage });
         return;
       }
-      res.json({ success: true, message: `Dispense recorded. Shelf balance is now ${data}.` });
+      res.json({ success: true, message: `Dispense recorded. Pharmacy-wide balance is now ${data}.` });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/locations', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'cashier', 'inventory_clerk'), async (_req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { data, error } = await supabase!
+        .from('pharmacy_locations')
+        .select('id, name, address, is_primary')
+        .eq('pharmacy_id', profile.id)
+        .order('is_primary', { ascending: false })
+        .order('name');
+      if (error) {
+        console.error('Pharmacy locations loading failed:', error.message);
+        res.status(500).json({ error: 'We could not load pharmacy locations. Confirm the latest database migration has been applied.' });
+        return;
+      }
+      res.json({ locations: data ?? [] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/management', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (_req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const [items, batches, transactions, ledger, suppliers, deliveries, locations, recalls] = await Promise.all([
+        supabase!.from('formulary_items').select('id, sku, name, current_balance, min_threshold, cost_price_ghc, selling_price_ghc').eq('pharmacy_id', profile.id),
+        supabase!.from('batches').select('id, item_id, location_id, batch_no, expiry_date, current_quantity, cost_price_ghc, supplier_name, is_recalled').eq('pharmacy_id', profile.id).gt('current_quantity', 0),
+        supabase!.from('transactions').select('type, item_name, quantity, amount, created_at').eq('pharmacy_id', profile.id).order('created_at', { ascending: false }).limit(1000),
+        supabase!.from('stock_ledger').select('type, item_id, supplier_or_customer, qty_in, qty_out, balance_after, created_at').eq('pharmacy_id', profile.id).order('created_at', { ascending: false }).limit(1000),
+        supabase!.from('suppliers').select('*').eq('pharmacy_id', profile.id).order('name'),
+        supabase!.from('supplier_deliveries').select('*').eq('pharmacy_id', profile.id).order('expected_date'),
+        supabase!.from('pharmacy_locations').select('*').eq('pharmacy_id', profile.id).order('name'),
+        supabase!.from('recalled_batches').select('*').eq('pharmacy_id', profile.id).eq('active', true).order('recalled_at', { ascending: false }),
+      ]);
+      const failed = [items, batches, transactions, ledger, suppliers, deliveries, locations, recalls].find((result) => result.error);
+      if (failed?.error) {
+        console.error('Management data loading failed:', failed.error.message);
+        res.status(500).json({ error: 'We could not load management data. Confirm the latest database migration has been applied.' });
+        return;
+      }
+      res.json({
+        items: items.data ?? [],
+        batches: batches.data ?? [],
+        transactions: transactions.data ?? [],
+        ledger: ledger.data ?? [],
+        suppliers: suppliers.data ?? [],
+        deliveries: deliveries.data ?? [],
+        locations: locations.data ?? [],
+        recalls: recalls.data ?? [],
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/management/staff', requireConfiguration, authenticate, requireRoles('admin'), async (_req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { data, error } = await supabase!.from('pharmacy_staff').select('id, user_id, email, role, active, created_at').eq('pharmacy_id', profile.id).order('created_at');
+      if (error) {
+        console.error('Staff loading failed:', error.message);
+        res.status(500).json({ error: 'We could not load staff access.' });
+        return;
+      }
+      res.json({ staff: data ?? [] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/staff', requireConfiguration, authenticate, requireRoles('admin'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { email, role } = isRecord(req.body) ? req.body : {};
+      if (!validText(email, 254) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+        !['pharmacist', 'cashier', 'inventory_clerk'].includes(String(role))) {
+        res.status(400).json({ error: 'Enter an existing account email and a valid staff role.' });
+        return;
+      }
+      const users = await supabase!.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      if (users.error) {
+        console.error('Staff account lookup failed:', users.error.message);
+        res.status(500).json({ error: 'We could not verify that staff account.' });
+        return;
+      }
+      const account = users.data.users.find((user) => user.email?.toLowerCase() === email.trim().toLowerCase());
+      if (!account) {
+        res.status(404).json({ error: 'That email does not belong to an account yet. Ask the staff member to create an account first.' });
+        return;
+      }
+      if (account.id === profile.owner_id) {
+        res.status(400).json({ error: 'The pharmacy owner already has administrator access.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('pharmacy_staff').upsert({
+        pharmacy_id: profile.id,
+        user_id: account.id,
+        email: account.email!,
+        role,
+        active: true,
+      }, { onConflict: 'pharmacy_id,user_id' }).select('id, user_id, email, role, active, created_at').single();
+      if (error) {
+        console.error('Staff role assignment failed:', error.message);
+        res.status(500).json({ error: 'We could not assign this staff role.' });
+        return;
+      }
+      res.status(201).json({ staff: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/management/staff/:staffId', requireConfiguration, authenticate, requireRoles('admin'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { role, active } = isRecord(req.body) ? req.body : {};
+      if ((role !== undefined && !['pharmacist', 'cashier', 'inventory_clerk'].includes(String(role))) ||
+        (active !== undefined && typeof active !== 'boolean') ||
+        (role === undefined && active === undefined)) {
+        res.status(400).json({ error: 'Provide a valid staff role or active status.' });
+        return;
+      }
+      const changes: Record<string, unknown> = {};
+      if (role !== undefined) changes.role = role;
+      if (active !== undefined) changes.active = active;
+      const { data, error } = await supabase!.from('pharmacy_staff').update(changes).eq('id', req.params.staffId).eq('pharmacy_id', profile.id).select('id, email, role, active').maybeSingle();
+      if (error || !data) {
+        if (error) console.error('Staff permission update failed:', error.message);
+        res.status(error ? 500 : 404).json({ error: 'We could not update this staff member.' });
+        return;
+      }
+      res.json({ staff: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/management/patients', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist'), async (_req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const [patients, prescriptions] = await Promise.all([
+        supabase!.from('patients').select('*').eq('pharmacy_id', profile.id).order('full_name'),
+        supabase!.from('prescriptions').select('*').eq('pharmacy_id', profile.id).order('prescribed_on', { ascending: false }),
+      ]);
+      if (patients.error || prescriptions.error) {
+        console.error('Patient records loading failed:', patients.error?.message ?? prescriptions.error?.message);
+        res.status(500).json({ error: 'We could not load patient records. Confirm the latest database migration has been applied.' });
+        return;
+      }
+      res.json({ patients: patients.data ?? [], prescriptions: prescriptions.data ?? [] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/patients', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { fullName, dateOfBirth, phone } = isRecord(req.body) ? req.body : {};
+      if (!validText(fullName, 160) || (phone !== undefined && typeof phone !== 'string') ||
+        (dateOfBirth !== undefined && dateOfBirth !== '' && (!validDateOnly(dateOfBirth) || Date.parse(dateOfBirth) > Date.now()))) {
+        res.status(400).json({ error: 'Enter a valid patient name, date of birth, and contact number.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('patients').insert({
+        pharmacy_id: profile.id,
+        full_name: fullName.trim(),
+        date_of_birth: dateOfBirth || null,
+        phone: typeof phone === 'string' ? phone.trim().slice(0, 40) : '',
+      }).select('*').single();
+      if (error) {
+        console.error('Patient creation failed:', error.message);
+        res.status(500).json({ error: 'We could not save this patient record.' });
+        return;
+      }
+      res.status(201).json({ patient: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/patients/:patientId/prescriptions', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { medicineName, dosage, prescriber, prescribedOn, notes } = isRecord(req.body) ? req.body : {};
+      if (!validText(medicineName, 160) ||
+        (dosage !== undefined && typeof dosage !== 'string') ||
+        (prescriber !== undefined && typeof prescriber !== 'string') ||
+        (prescribedOn !== undefined && (!validDateOnly(prescribedOn) || Date.parse(prescribedOn) > Date.now())) ||
+        (notes !== undefined && typeof notes !== 'string')) {
+        res.status(400).json({ error: 'Enter valid prescription details.' });
+        return;
+      }
+      const { data: patient, error: patientError } = await supabase!
+        .from('patients')
+        .select('id')
+        .eq('id', req.params.patientId)
+        .eq('pharmacy_id', profile.id)
+        .maybeSingle();
+      if (patientError || !patient) {
+        if (patientError) console.error('Prescription patient lookup failed:', patientError.message);
+        res.status(patientError ? 500 : 404).json({ error: 'Patient record not found for this pharmacy.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('prescriptions').insert({
+        pharmacy_id: profile.id,
+        patient_id: req.params.patientId,
+        medicine_name: medicineName.trim(),
+        dosage: typeof dosage === 'string' ? dosage.trim().slice(0, 160) : '',
+        prescriber: typeof prescriber === 'string' ? prescriber.trim().slice(0, 160) : '',
+        prescribed_on: prescribedOn ?? new Date().toISOString().slice(0, 10),
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 1000) : '',
+      }).select('*').single();
+      if (error) {
+        console.error('Prescription creation failed:', error.message);
+        res.status(400).json({ error: 'We could not save this prescription. Verify the patient belongs to this pharmacy.' });
+        return;
+      }
+      res.status(201).json({ prescription: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/management/prescriptions/:prescriptionId', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { active } = isRecord(req.body) ? req.body : {};
+      if (typeof active !== 'boolean') {
+        res.status(400).json({ error: 'Choose whether this medication is currently active.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('prescriptions').update({ active })
+        .eq('id', req.params.prescriptionId)
+        .eq('pharmacy_id', profile.id)
+        .select('id, active')
+        .maybeSingle();
+      if (error || !data) {
+        if (error) console.error('Medication status update failed:', error.message);
+        res.status(error ? 500 : 404).json({ error: 'We could not update this medication record.' });
+        return;
+      }
+      res.json({ prescription: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/suppliers', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { name, contactName, email, phone, notes } = isRecord(req.body) ? req.body : {};
+      if (!validText(name, 160) || [contactName, email, phone, notes].some((value) => value !== undefined && typeof value !== 'string')) {
+        res.status(400).json({ error: 'Enter a supplier name and valid contact details.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('suppliers').upsert({
+        pharmacy_id: profile.id,
+        name: name.trim(),
+        contact_name: typeof contactName === 'string' ? contactName.trim().slice(0, 160) : '',
+        email: typeof email === 'string' ? email.trim().slice(0, 254) : '',
+        phone: typeof phone === 'string' ? phone.trim().slice(0, 40) : '',
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 1000) : '',
+      }, { onConflict: 'pharmacy_id,name' }).select('*').single();
+      if (error) {
+        console.error('Supplier save failed:', error.message);
+        res.status(500).json({ error: 'We could not save this supplier.' });
+        return;
+      }
+      res.status(201).json({ supplier: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/deliveries', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { supplierId, reference, expectedDate, notes } = isRecord(req.body) ? req.body : {};
+      if (!validText(supplierId, 80) || !validText(reference, 100) || !validDateOnly(expectedDate) || (notes !== undefined && typeof notes !== 'string')) {
+        res.status(400).json({ error: 'Enter a supplier, delivery reference, and expected date.' });
+        return;
+      }
+      const { data: supplier, error: supplierError } = await supabase!
+        .from('suppliers')
+        .select('id')
+        .eq('id', supplierId)
+        .eq('pharmacy_id', profile.id)
+        .maybeSingle();
+      if (supplierError || !supplier) {
+        if (supplierError) console.error('Delivery supplier lookup failed:', supplierError.message);
+        res.status(supplierError ? 500 : 404).json({ error: 'Supplier record not found for this pharmacy.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('supplier_deliveries').insert({
+        pharmacy_id: profile.id,
+        supplier_id: supplierId,
+        reference: reference.trim(),
+        expected_date: expectedDate,
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 1000) : '',
+      }).select('*').single();
+      if (error) {
+        console.error('Delivery tracking failed:', error.message);
+        res.status(400).json({ error: 'We could not track this delivery. Verify the supplier belongs to this pharmacy.' });
+        return;
+      }
+      res.status(201).json({ delivery: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/management/deliveries/:deliveryId', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { status } = isRecord(req.body) ? req.body : {};
+      if (!['pending', 'received', 'cancelled'].includes(String(status))) {
+        res.status(400).json({ error: 'Choose pending, received, or cancelled.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('supplier_deliveries').update({ status }).eq('id', req.params.deliveryId).eq('pharmacy_id', profile.id).select('*').maybeSingle();
+      if (error || !data) {
+        if (error) console.error('Delivery status update failed:', error.message);
+        res.status(error ? 500 : 404).json({ error: 'We could not update this delivery.' });
+        return;
+      }
+      res.json({ delivery: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/locations', requireConfiguration, authenticate, requireRoles('admin'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { name, address } = isRecord(req.body) ? req.body : {};
+      if (!validText(name, 120) || (address !== undefined && typeof address !== 'string')) {
+        res.status(400).json({ error: 'Enter a valid location name and address.' });
+        return;
+      }
+      const { data, error } = await supabase!.from('pharmacy_locations').insert({
+        pharmacy_id: profile.id,
+        name: name.trim(),
+        address: typeof address === 'string' ? address.trim().slice(0, 300) : '',
+      }).select('*').single();
+      if (error) {
+        console.error('Location creation failed:', error.message);
+        res.status(400).json({ error: 'We could not add this location. Location names must be unique.' });
+        return;
+      }
+      res.status(201).json({ location: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/transfers', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { itemId, batchId, destinationLocationId, quantity } = isRecord(req.body) ? req.body : {};
+      if (!validText(itemId, 80) || !validText(batchId, 80) || !validText(destinationLocationId, 80) ||
+        !validNumber(quantity, 1) || !Number.isInteger(quantity)) {
+        res.status(400).json({ error: 'Choose an item, batch, destination, and positive whole-number quantity.' });
+        return;
+      }
+      const { error } = await supabase!.rpc('transfer_stock', {
+        p_owner_id: res.locals.userId,
+        p_pharmacy_id: profile.id,
+        p_item_id: itemId,
+        p_batch_id: batchId,
+        p_destination_location_id: destinationLocationId,
+        p_quantity: quantity,
+        p_recorded_by: profile.manager_name,
+      });
+      if (error) {
+        console.error('Stock transfer failed:', error.message);
+        res.status(error.code === 'P0002' ? 404 : 400).json({ error: 'We could not transfer this stock. Check the batch balance, expiry, recall status, and destination.' });
+        return;
+      }
+      res.json({ success: true, message: 'Stock transferred and ledger updated.' });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/management/batches/:batchId/recall', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { reason } = isRecord(req.body) ? req.body : {};
+      if (!validText(reason, 1000)) {
+        res.status(400).json({ error: 'Provide a recall reason.' });
+        return;
+      }
+      const { data: batch, error: batchError } = await supabase!.from('batches').update({ is_recalled: true }).eq('id', req.params.batchId).eq('pharmacy_id', profile.id).select('id').maybeSingle();
+      if (batchError || !batch) {
+        if (batchError) console.error('Batch recall failed:', batchError.message);
+        res.status(batchError ? 500 : 404).json({ error: 'We could not find this pharmacy batch.' });
+        return;
+      }
+      const { error } = await supabase!.from('recalled_batches').upsert({
+        pharmacy_id: profile.id,
+        batch_id: batch.id,
+        reason: reason.trim(),
+        active: true,
+      }, { onConflict: 'batch_id' });
+      if (error) {
+        console.error('Recall record save failed:', error.message);
+        res.status(500).json({ error: 'The batch is blocked from dispensing, but we could not save the recall details. Contact an administrator.' });
+        return;
+      }
+      res.status(201).json({ success: true });
     } catch (error) {
       next(error);
     }

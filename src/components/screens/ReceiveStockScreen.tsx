@@ -7,6 +7,9 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
+import { apiGet } from '../../services/api';
+
+interface PharmacyLocation { id: string; name: string; is_primary: boolean; }
 
 export const ReceiveStockScreen: React.FC = () => {
   const { 
@@ -23,6 +26,11 @@ export const ReceiveStockScreen: React.FC = () => {
 
   // Form states
   const [supplier, setSupplier] = useState('');
+  const [supplierNames, setSupplierNames] = useState<string[]>([]);
+  const [supplierLoadError, setSupplierLoadError] = useState('');
+  const [locations, setLocations] = useState<PharmacyLocation[]>([]);
+  const [locationId, setLocationId] = useState('');
+  const [locationLoadError, setLocationLoadError] = useState('');
   const [batchNo, setBatchNo] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
   const [quantityReceived, setQuantityReceived] = useState<number | string>('');
@@ -34,17 +42,45 @@ export const ReceiveStockScreen: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  useEffect(() => {
+    let active = true;
+    apiGet<{ suppliers: { name: string }[] }>('/api/management')
+      .then(({ suppliers: savedSuppliers }) => {
+        if (active) setSupplierNames(savedSuppliers.map((entry) => entry.name));
+      })
+      .catch((error: unknown) => {
+        if (active) setSupplierLoadError(error instanceof Error ? error.message : 'Saved supplier names could not be loaded.');
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    apiGet<{ locations: PharmacyLocation[] }>('/api/locations')
+      .then(({ locations: savedLocations }) => {
+        if (!active) return;
+        setLocations(savedLocations);
+        setLocationId((current) => current || savedLocations.find((location) => location.is_primary)?.id || savedLocations[0]?.id || '');
+      })
+      .catch((error: unknown) => {
+        if (active) setLocationLoadError(error instanceof Error ? error.message : 'Stock locations could not be loaded.');
+      });
+    return () => { active = false; };
+  }, []);
+
   // Update fields when selected item changes
   useEffect(() => {
     if (currentItem) {
-      setPhysicalCountAvailable(currentItem.currentBalance);
+      setPhysicalCountAvailable(currentItem.batches
+        .filter((batch) => batch.locationId === locationId)
+        .reduce((sum, batch) => sum + batch.currentQuantity, 0));
       setCostPriceGhc(currentItem.costPriceGhc || '');
       setSellingPriceGhc(currentItem.sellingPriceGhc || '');
       setBatchNo('');
       setExpiryDate('');
       setQuantityReceived('');
     }
-  }, [currentItem?.id]);
+  }, [currentItem?.id, locationId]);
 
   // Financial calculations
   const cost = Number(costPriceGhc) || 0;
@@ -82,6 +118,7 @@ export const ReceiveStockScreen: React.FC = () => {
 
     const res = await receiveStock({
       itemId: currentItem.id,
+      locationId,
       supplier: supplier.trim(),
       batchNo: batchNo.trim(),
       expiryDate,
@@ -160,6 +197,7 @@ export const ReceiveStockScreen: React.FC = () => {
           )}
         </div>
       )}
+      {locationLoadError && <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Stock locations are unavailable: {locationLoadError}</div>}
 
       {/* Main Grid: Left Consignment Form, Right Recent Deliveries */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -186,6 +224,12 @@ export const ReceiveStockScreen: React.FC = () => {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">Receiving location</label>
+              <select required value={locationId} onChange={(event) => setLocationId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-800" disabled={Boolean(locationLoadError)}>
+                {locations.map((location) => <option key={location.id} value={location.id}>{location.name}{location.is_primary ? ' · Primary' : ''}</option>)}
+              </select>
+            </div>
             {/* Item Name Selection */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -193,7 +237,7 @@ export const ReceiveStockScreen: React.FC = () => {
                   Item Name <span className="text-rose-500">*</span>
                 </label>
                 <span className="text-xs font-semibold text-slate-500">
-                  Current Balance: <strong className="text-teal-700 font-mono tabular-nums">{currentItem?.currentBalance || 0} {currentItem?.unit}</strong>
+                  Pharmacy-wide balance: <strong className="text-teal-700 font-mono tabular-nums">{currentItem?.currentBalance || 0} {currentItem?.unit}</strong>
                 </span>
               </div>
 
@@ -225,7 +269,7 @@ export const ReceiveStockScreen: React.FC = () => {
                   </p>
                   <div className="mt-2 flex items-center gap-3">
                     <span className="font-semibold text-sky-900 text-xs">
-                      Confirmed shelf balance before receipt:
+                      Confirmed balance at this location before receipt:
                     </span>
                     <div className="flex items-center gap-1.5">
                       <input
@@ -250,11 +294,15 @@ export const ReceiveStockScreen: React.FC = () => {
               <input
                 type="text"
                 required
+                list="supplier-directory"
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
-                placeholder="Enter the supplier name"
+                placeholder={supplierNames.length ? 'Select a saved supplier or enter a new name' : 'Enter the supplier name'}
                 className="w-full py-2.5 px-3.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
               />
+              <datalist id="supplier-directory">{supplierNames.map((name) => <option key={name} value={name} />)}</datalist>
+              {supplierLoadError && <p role="status" className="mt-1 text-xs text-amber-700">Saved supplier list unavailable: {supplierLoadError}</p>}
+              {!supplierLoadError && <p className="mt-1 text-xs text-slate-500">Use a saved supplier name to link this batch to vendor performance history.</p>}
             </div>
 
             {/* Batch Number & Expiry Date */}
@@ -412,7 +460,7 @@ export const ReceiveStockScreen: React.FC = () => {
             <div className="pt-2 flex justify-end">
               <button
                 type="submit"
-                disabled={submitting}
+                disabled={submitting || !locationId || Boolean(locationLoadError)}
                 className="flex items-center gap-2 px-6 py-2.5 bg-[#197882] hover:bg-[#14646D] text-white font-semibold text-xs sm:text-sm rounded-lg transition-colors shadow-sm cursor-pointer disabled:opacity-50"
               >
                 <CheckCircle2 className="w-4 h-4" />

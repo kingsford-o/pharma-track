@@ -40,6 +40,35 @@
   }
 }
 
+.print-output {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+
+  .print-output,
+  .print-output * {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  .print-output {
+    position: fixed;
+    inset: 0 auto auto 0;
+    width: 100%;
+    padding: 1rem;
+    background: white;
+    color: black;
+  }
+
+  .print-output button {
+    display: none !important;
+  }
+}
+
 /* Custom scrollbars for high density medical data tables */
 ::-webkit-scrollbar {
   width: 6px;

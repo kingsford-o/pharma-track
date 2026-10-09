@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, supabaseConfigurationError } from '../lib/supabaseClient';
 import { LoginScreen } from './screens/LoginScreen';
 import { AccountCreationScreen } from './screens/AccountCreationScreen';
 import { ProfileProvider, ProfileGate } from '../context/ProfileContext';
@@ -10,6 +10,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [userId, setUserId] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
   const [sessionError, setSessionError] = useState('');
 
   useEffect(() => {
@@ -24,6 +25,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   }, []);
 
   const establishSession = async (email: string, password: string, remember = true) => {
+    if (supabaseConfigurationError) throw new Error(supabaseConfigurationError);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     if (!data.session) throw new Error('Sign in succeeded but no authentication token was returned.');
@@ -52,15 +54,14 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
           <AccountCreationScreen
             onBackToLogin={() => setCreatingAccount(false)}
             onSubmit={async (email, password, approvalPassword) => {
-              const response = await fetch('/api/auth/signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ email, password, approvalPassword }),
-              });
-              const result = (await response.json()) as { error?: string };
-              if (!response.ok) throw new Error(result.error || 'We could not create your account. Please try again.');
-              await establishSession(email, password);
+              if (supabaseConfigurationError) throw new Error(supabaseConfigurationError);
+              await apiPost<{ message: string }>(
+                '/api/auth/signup',
+                { email, password, approvalPassword },
+                { signal: AbortSignal.timeout(30_000) },
+              );
+              setRegisteredEmail(email.trim());
+              setCreatingAccount(false);
             }}
           />
         </>
@@ -71,9 +72,18 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
       <>
         {warning}
         <LoginScreen
-          onCreateAccount={() => setCreatingAccount(true)}
+          initialEmail={registeredEmail}
+          notice={registeredEmail ? 'Your account was created. Sign in with your new password.' : undefined}
+          onCreateAccount={() => {
+            setRegisteredEmail('');
+            setCreatingAccount(true);
+          }}
           onSubmit={establishSession}
           onForgotPassword={async () => {
+            if (supabaseConfigurationError) {
+              window.alert(supabaseConfigurationError);
+              return;
+            }
             const email = window.prompt('Enter your account email');
             if (!email) return;
             const { error } = await supabase.auth.resetPasswordForEmail(email.trim());

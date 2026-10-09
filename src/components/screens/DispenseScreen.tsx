@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   AlertTriangle, 
   Send, 
@@ -8,10 +8,14 @@ import {
   Layers, 
   ArrowRight,
   ShieldCheck,
-  FileText
+  FileText,
+  Printer,
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
 import { useProfile } from '../../context/ProfileContext';
+import { apiGet } from '../../services/api';
+
+interface PharmacyLocation { id: string; name: string; is_primary: boolean; }
 
 export const DispenseScreen: React.FC = () => {
   const { profile } = useProfile();
@@ -32,10 +36,30 @@ export const DispenseScreen: React.FC = () => {
   const [prescriberName, setPrescriberName] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [lastReceipt, setLastReceipt] = useState<{ itemName: string; quantity: number; unit: string; unitPrice: number; reference: string; amount: number; date: string } | null>(null);
+  const [locations, setLocations] = useState<PharmacyLocation[]>([]);
+  const [locationId, setLocationId] = useState('');
+  const [locationLoadError, setLocationLoadError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    apiGet<{ locations: PharmacyLocation[] }>('/api/locations')
+      .then(({ locations: savedLocations }) => {
+        if (!active) return;
+        setLocations(savedLocations);
+        setLocationId((current) => current || savedLocations.find((location) => location.is_primary)?.id || savedLocations[0]?.id || '');
+      })
+      .catch((error: unknown) => {
+        if (active) setLocationLoadError(error instanceof Error ? error.message : 'Stock locations could not be loaded.');
+      });
+    return () => { active = false; };
+  }, []);
 
   const reqQty = Number(quantityToDispense) || 0;
   const today = new Date().toISOString().slice(0, 10);
-  const eligibleBatches = currentItem?.batches.filter((batch) => batch.currentQuantity > 0 && batch.expiryDate > today) ?? [];
+  const eligibleBatches = currentItem?.batches.filter((batch) =>
+    batch.currentQuantity > 0 && batch.expiryDate > today && !batch.isRecalled && batch.locationId === locationId,
+  ) ?? [];
   const availableBalance = eligibleBatches.reduce((sum, batch) => sum + batch.currentQuantity, 0);
   const isShortfall = reqQty > availableBalance;
   const shortfallAmount = reqQty - availableBalance;
@@ -81,6 +105,10 @@ export const DispenseScreen: React.FC = () => {
   const handleDispenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentItem) return;
+    if (!locationId || locationLoadError) {
+      setStatusMessage({ type: 'error', text: 'Choose an available stock location before dispensing.' });
+      return;
+    }
 
     if (reqQty <= 0) {
       setStatusMessage({ type: 'error', text: 'Please enter a valid quantity to dispense.' });
@@ -105,6 +133,7 @@ export const DispenseScreen: React.FC = () => {
 
     const res = await dispenseStock({
       itemId: currentItem.id,
+      locationId,
       quantityToDispense: reqQty,
       referenceNo: referenceNo.trim(),
       prescriberName: requiresPrescriber ? prescriberName.trim() : undefined,
@@ -115,6 +144,15 @@ export const DispenseScreen: React.FC = () => {
 
     if (res.success) {
       setStatusMessage({ type: 'success', text: res.message });
+      setLastReceipt({
+        itemName: currentItem.name,
+        quantity: reqQty,
+        unit: currentItem.unit,
+        unitPrice: currentItem.sellingPriceGhc,
+        reference: referenceNo.trim(),
+        amount: reqQty * currentItem.sellingPriceGhc,
+        date: new Date().toLocaleString(),
+      });
       setQuantityToDispense('');
       setReferenceNo('');
     } else {
@@ -194,17 +232,31 @@ export const DispenseScreen: React.FC = () => {
             ) : (
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
             )}
+            {locationLoadError && <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">Stock locations are unavailable: {locationLoadError}</div>}
             <span>{statusMessage.text}</span>
           </div>
           {statusMessage.type === 'success' && (
-            <button
-              onClick={() => setActiveScreen('bincard')}
-              className="text-xs font-semibold underline text-emerald-900 ml-4 shrink-0"
-            >
-              Inspect Bin Card Ledger →
-            </button>
+            <div className="ml-4 flex shrink-0 gap-3">
+              <button onClick={() => setActiveScreen('bincard')} className="text-xs font-semibold underline text-emerald-900">
+                Inspect Bin Card Ledger →
+              </button>
+              {lastReceipt && <button onClick={() => window.print()} className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-900">
+                <Printer className="h-3.5 w-3.5" /> Print receipt
+              </button>}
+            </div>
           )}
         </div>
+      )}
+      {lastReceipt && statusMessage?.type === 'success' && (
+        <section className="print-output" aria-label="Dispense receipt">
+          <h1 className="text-xl font-bold">{profile?.name || 'Pharmacy'} · Dispense receipt</h1>
+          <p className="mt-3">{lastReceipt.date}</p>
+          <p className="mt-2">Item: {lastReceipt.itemName}</p>
+          <p>Quantity: {lastReceipt.quantity} {lastReceipt.unit}</p>
+          <p>Unit price: GH₵ {lastReceipt.unitPrice.toFixed(2)}</p>
+          <p>Reference: {lastReceipt.reference || '—'}</p>
+          <p className="mt-3 font-bold">Total: GH₵ {lastReceipt.amount.toFixed(2)}</p>
+        </section>
       )}
 
       {/* Main Grid: Left Dispense Details, Right Recent Dispenses */}
@@ -239,7 +291,7 @@ export const DispenseScreen: React.FC = () => {
                   Item Name <span className="text-rose-500">*</span>
                 </label>
                 <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
-                  ● Available: {currentItem?.currentBalance} {currentItem?.unit}
+                  ● Available here: {availableBalance} {currentItem?.unit}
                 </span>
               </div>
 
@@ -256,6 +308,12 @@ export const DispenseScreen: React.FC = () => {
                   ))}
                 </select>
               </div>
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-bold text-slate-700">Dispensing location</label>
+              <select required value={locationId} onChange={(event) => setLocationId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-800" disabled={Boolean(locationLoadError)}>
+                {locations.map((location) => <option key={location.id} value={location.id}>{location.name}{location.is_primary ? ' · Primary' : ''}</option>)}
+              </select>
             </div>
 
             {/* Quantity to Dispense */}
@@ -439,7 +497,7 @@ export const DispenseScreen: React.FC = () => {
 
                 <button
                   type="submit"
-                  disabled={submitting || isShortfall}
+                  disabled={submitting || isShortfall || !locationId || Boolean(locationLoadError)}
                   className="flex items-center gap-1.5 px-5 py-2 bg-[#197882] hover:bg-[#14646D] text-white rounded-lg text-xs font-semibold transition-colors shadow-sm disabled:opacity-50 cursor-pointer"
                 >
                   <Lock className="w-3.5 h-3.5" />

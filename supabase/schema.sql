@@ -1,5 +1,67 @@
 -- Run in Supabase SQL Editor. Safe to re-run.
 
+create table if not exists public.user_profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null default '',
+  full_name text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_profiles enable row level security;
+revoke all on public.user_profiles from anon;
+grant select on public.user_profiles to authenticated;
+grant update (full_name) on public.user_profiles to authenticated;
+drop policy if exists "users read own profile" on public.user_profiles;
+create policy "users read own profile" on public.user_profiles
+  for select to authenticated using (id = auth.uid());
+drop policy if exists "users update own profile" on public.user_profiles;
+create policy "users update own profile" on public.user_profiles
+  for update to authenticated using (id = auth.uid()) with check (id = auth.uid());
+
+create or replace function public.sync_user_profile()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.user_profiles (id, email, full_name)
+  values (
+    new.id,
+    coalesce(new.email, ''),
+    coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), '')
+  )
+  on conflict (id) do update
+  set email = excluded.email,
+      full_name = case
+        when excluded.full_name <> '' then excluded.full_name
+        else public.user_profiles.full_name
+      end,
+      updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_profile_sync on auth.users;
+create trigger on_auth_user_profile_sync
+after insert or update of email, raw_user_meta_data on auth.users
+for each row execute function public.sync_user_profile();
+
+insert into public.user_profiles (id, email, full_name)
+select
+  id,
+  coalesce(email, ''),
+  coalesce(nullif(trim(raw_user_meta_data ->> 'full_name'), ''), '')
+from auth.users
+on conflict (id) do update
+set email = excluded.email,
+    full_name = case
+      when excluded.full_name <> '' then excluded.full_name
+      else public.user_profiles.full_name
+    end,
+    updated_at = now();
+
 create table if not exists public.pharmacies (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null unique references auth.users(id) on delete cascade,
@@ -91,6 +153,115 @@ create table if not exists public.market_benchmarks (
   last_updated date not null default current_date
 );
 
+create table if not exists public.pharmacy_staff (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  email text not null,
+  role text not null check (role in ('admin', 'pharmacist', 'cashier', 'inventory_clerk')),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (pharmacy_id, user_id),
+  unique (user_id)
+);
+alter table public.pharmacy_staff add column if not exists email text not null default '';
+
+create table if not exists public.pharmacy_locations (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  name text not null,
+  address text not null default '',
+  is_primary boolean not null default false,
+  created_at timestamptz not null default now(),
+  unique (pharmacy_id, name)
+);
+
+create table if not exists public.suppliers (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  name text not null,
+  contact_name text not null default '',
+  email text not null default '',
+  phone text not null default '',
+  notes text not null default '',
+  created_at timestamptz not null default now(),
+  unique (pharmacy_id, name)
+);
+
+create table if not exists public.supplier_deliveries (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  supplier_id uuid not null references public.suppliers(id) on delete cascade,
+  reference text not null,
+  expected_date date not null,
+  status text not null default 'pending' check (status in ('pending', 'received', 'cancelled')),
+  notes text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.patients (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  full_name text not null,
+  date_of_birth date,
+  phone text not null default '',
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.prescriptions (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  patient_id uuid not null references public.patients(id) on delete cascade,
+  medicine_name text not null,
+  dosage text not null default '',
+  prescriber text not null default '',
+  prescribed_on date not null default current_date,
+  notes text not null default '',
+  active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+alter table public.prescriptions add column if not exists active boolean not null default true;
+
+create table if not exists public.recalled_batches (
+  id uuid primary key default gen_random_uuid(),
+  pharmacy_id uuid not null references public.pharmacies(id) on delete cascade,
+  batch_id uuid not null references public.batches(id) on delete cascade,
+  reason text not null,
+  recalled_at timestamptz not null default now(),
+  active boolean not null default true,
+  unique (batch_id)
+);
+
+create or replace function public.create_default_pharmacy_location()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.pharmacy_locations (pharmacy_id, name, is_primary)
+  values (new.id, 'Main store', true)
+  on conflict (pharmacy_id, name) do nothing;
+  return new;
+end;
+$$;
+
+drop trigger if exists pharmacies_create_default_location on public.pharmacies;
+create trigger pharmacies_create_default_location
+after insert on public.pharmacies
+for each row execute function public.create_default_pharmacy_location();
+
+alter table public.batches add column if not exists location_id uuid references public.pharmacy_locations(id) on delete set null;
+alter table public.batches add column if not exists is_recalled boolean not null default false;
+insert into public.pharmacy_locations (pharmacy_id, name, is_primary)
+select p.id, 'Main store', true
+from public.pharmacies p
+where not exists (select 1 from public.pharmacy_locations l where l.pharmacy_id = p.id);
+update public.batches b
+set location_id = l.id
+from public.pharmacy_locations l
+where b.pharmacy_id = l.pharmacy_id and l.is_primary and b.location_id is null;
+
 -- Compatibility for projects that ran the earlier unowned prototype schema.
 alter table public.formulary_items add column if not exists pharmacy_id uuid references public.pharmacies(id) on delete cascade;
 alter table public.formulary_items add column if not exists earliest_expiry date;
@@ -118,12 +289,41 @@ create index if not exists formulary_items_pharmacy_idx on public.formulary_item
 create index if not exists batches_pharmacy_item_expiry_idx on public.batches (pharmacy_id, item_id, expiry_date);
 create index if not exists stock_ledger_pharmacy_date_idx on public.stock_ledger (pharmacy_id, created_at desc);
 create index if not exists transactions_pharmacy_date_idx on public.transactions (pharmacy_id, created_at desc);
+create index if not exists pharmacy_staff_user_idx on public.pharmacy_staff (user_id, active);
+create index if not exists suppliers_pharmacy_name_idx on public.suppliers (pharmacy_id, name);
+create index if not exists patients_pharmacy_name_idx on public.patients (pharmacy_id, full_name);
+create index if not exists prescriptions_patient_date_idx on public.prescriptions (patient_id, prescribed_on desc);
+create index if not exists deliveries_pharmacy_date_idx on public.supplier_deliveries (pharmacy_id, expected_date);
 
 alter table public.formulary_items enable row level security;
 alter table public.batches enable row level security;
 alter table public.stock_ledger enable row level security;
 alter table public.transactions enable row level security;
 alter table public.market_benchmarks enable row level security;
+alter table public.pharmacy_staff enable row level security;
+alter table public.pharmacy_locations enable row level security;
+alter table public.suppliers enable row level security;
+alter table public.supplier_deliveries enable row level security;
+alter table public.patients enable row level security;
+alter table public.prescriptions enable row level security;
+alter table public.recalled_batches enable row level security;
+
+do $$
+declare
+  table_name text;
+begin
+  foreach table_name in array array[
+    'pharmacy_staff', 'pharmacy_locations', 'suppliers', 'supplier_deliveries',
+    'patients', 'prescriptions', 'recalled_batches'
+  ] loop
+    execute format('drop policy if exists %I on public.%I', 'service role only ' || table_name, table_name);
+    execute format(
+      'create policy %I on public.%I for all to service_role using (true) with check (true)',
+      'service role only ' || table_name, table_name
+    );
+  end loop;
+end
+$$;
 
 drop policy if exists "Public read formulary items" on public.formulary_items;
 drop policy if exists "Public write formulary items" on public.formulary_items;
@@ -153,6 +353,7 @@ create policy "owners manage own transactions" on public.transactions for all
 drop policy if exists "benchmarks are readable by signed in users" on public.market_benchmarks;
 create policy "benchmarks are readable by signed in users" on public.market_benchmarks for select to authenticated using (true);
 
+drop function if exists public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text);
 create or replace function public.receive_stock(
   p_owner_id uuid,
   p_pharmacy_id uuid,
@@ -164,7 +365,8 @@ create or replace function public.receive_stock(
   p_physical_count integer,
   p_cost_price numeric,
   p_selling_price numeric,
-  p_recorded_by text
+  p_recorded_by text,
+  p_location_id uuid default null
 ) returns integer
 language plpgsql
 security definer
@@ -173,22 +375,37 @@ as $$
 declare
   item_row public.formulary_items%rowtype;
   new_balance integer;
+  target_location_id uuid;
+  location_balance integer;
 begin
-  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id) then
+  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id)
+    and not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
     raise exception 'Pharmacy access denied' using errcode = '42501';
   end if;
   select * into item_row from public.formulary_items
     where id = p_item_id and pharmacy_id = p_pharmacy_id for update;
   if not found then raise exception 'Medicine not found' using errcode = 'P0002'; end if;
-  if p_physical_count <> item_row.current_balance then
-    raise exception 'Physical count does not match recorded balance' using errcode = '22023';
+  if p_location_id is not null and not exists (
+    select 1 from public.pharmacy_locations where id = p_location_id and pharmacy_id = p_pharmacy_id
+  ) then
+    raise exception 'Stock location not found' using errcode = 'P0002';
+  end if;
+  target_location_id := coalesce(p_location_id, (
+    select id from public.pharmacy_locations where pharmacy_id = p_pharmacy_id
+    order by is_primary desc, created_at limit 1
+  ));
+  if target_location_id is null then raise exception 'Stock location not found' using errcode = 'P0002'; end if;
+  select coalesce(sum(current_quantity), 0)::integer into location_balance
+  from public.batches where pharmacy_id = p_pharmacy_id and location_id = target_location_id;
+  if p_physical_count <> location_balance then
+    raise exception 'Physical count does not match recorded location balance' using errcode = '22023';
   end if;
   if p_quantity <= 0 or p_expiry_date <= current_date then
     raise exception 'Quantity must be positive and expiry date must be in the future' using errcode = '22023';
   end if;
   new_balance := item_row.current_balance + p_quantity;
-  insert into public.batches (pharmacy_id, item_id, batch_no, shelf_location, expiry_date, initial_quantity, current_quantity, cost_price_ghc, supplier_name)
-  values (p_pharmacy_id, p_item_id, p_batch_no, item_row.shelf_location, p_expiry_date, p_quantity, p_quantity, p_cost_price, p_supplier);
+  insert into public.batches (pharmacy_id, item_id, location_id, batch_no, shelf_location, expiry_date, initial_quantity, current_quantity, cost_price_ghc, supplier_name)
+  values (p_pharmacy_id, p_item_id, target_location_id, p_batch_no, item_row.shelf_location, p_expiry_date, p_quantity, p_quantity, p_cost_price, p_supplier);
   update public.formulary_items set current_balance = new_balance, cost_price_ghc = p_cost_price,
     selling_price_ghc = p_selling_price, earliest_expiry = (
       select min(expiry_date) from public.batches where item_id = p_item_id and current_quantity > 0
@@ -202,6 +419,7 @@ begin
 end;
 $$;
 
+drop function if exists public.dispense_stock(uuid, uuid, uuid, integer, text, text, text);
 create or replace function public.dispense_stock(
   p_owner_id uuid,
   p_pharmacy_id uuid,
@@ -209,7 +427,8 @@ create or replace function public.dispense_stock(
   p_quantity integer,
   p_reference text,
   p_destination text,
-  p_recorded_by text
+  p_recorded_by text,
+  p_location_id uuid default null
 ) returns integer
 language plpgsql
 security definer
@@ -224,7 +443,8 @@ declare
   first_batch text := '';
   first_expiry date;
 begin
-  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id) then
+  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id)
+    and not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
     raise exception 'Pharmacy access denied' using errcode = '42501';
   end if;
   select * into item_row from public.formulary_items
@@ -233,10 +453,16 @@ begin
   if p_quantity <= 0 or p_quantity > item_row.current_balance then
     raise exception 'Dispense quantity exceeds available balance' using errcode = '22023';
   end if;
+  if p_location_id is not null and not exists (
+    select 1 from public.pharmacy_locations where id = p_location_id and pharmacy_id = p_pharmacy_id
+  ) then
+    raise exception 'Stock location not found' using errcode = 'P0002';
+  end if;
   remaining := p_quantity;
   for batch_row in
     select * from public.batches
-    where item_id = p_item_id and pharmacy_id = p_pharmacy_id and current_quantity > 0 and expiry_date > current_date
+    where item_id = p_item_id and pharmacy_id = p_pharmacy_id and current_quantity > 0 and expiry_date > current_date and not is_recalled
+      and (p_location_id is null or location_id = p_location_id)
     order by expiry_date, created_at
     for update
   loop
@@ -260,6 +486,85 @@ begin
   insert into public.transactions (pharmacy_id, type, item_name, quantity, amount)
   values (p_pharmacy_id, 'sale', item_row.name, p_quantity, p_quantity * item_row.selling_price_ghc);
   return new_balance;
+end;
+$$;
+
+create or replace function public.transfer_stock(
+  p_owner_id uuid,
+  p_pharmacy_id uuid,
+  p_item_id uuid,
+  p_batch_id uuid,
+  p_destination_location_id uuid,
+  p_quantity integer,
+  p_recorded_by text
+) returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item_row public.formulary_items%rowtype;
+  batch_row public.batches%rowtype;
+  destination_name text;
+  source_name text;
+  new_batch_id uuid;
+begin
+  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id)
+    and not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
+    if not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
+      raise exception 'Pharmacy access denied' using errcode = '42501';
+    end if;
+  end if;
+  select * into item_row from public.formulary_items
+    where id = p_item_id and pharmacy_id = p_pharmacy_id for update;
+  if not found then raise exception 'Medicine not found' using errcode = 'P0002'; end if;
+  select * into batch_row from public.batches
+    where id = p_batch_id and item_id = p_item_id and pharmacy_id = p_pharmacy_id for update;
+  if not found or batch_row.current_quantity < p_quantity then
+    raise exception 'Batch does not have enough stock to transfer' using errcode = '22023';
+  end if;
+  if batch_row.is_recalled or batch_row.expiry_date <= current_date then
+    raise exception 'Expired or recalled stock cannot be transferred' using errcode = '22023';
+  end if;
+  select name into destination_name from public.pharmacy_locations
+    where id = p_destination_location_id and pharmacy_id = p_pharmacy_id;
+  if destination_name is null then raise exception 'Destination location not found' using errcode = 'P0002'; end if;
+  select name into source_name from public.pharmacy_locations where id = batch_row.location_id;
+  if batch_row.location_id = p_destination_location_id then
+    raise exception 'Choose a different destination location' using errcode = '22023';
+  end if;
+  if p_quantity <= 0 then raise exception 'Transfer quantity must be positive' using errcode = '22023'; end if;
+
+  if p_quantity = batch_row.current_quantity then
+    update public.batches set location_id = p_destination_location_id where id = batch_row.id;
+    new_batch_id := batch_row.id;
+  else
+    update public.batches set current_quantity = current_quantity - p_quantity where id = batch_row.id;
+    insert into public.batches (
+      pharmacy_id, item_id, location_id, batch_no, shelf_location, expiry_date,
+      initial_quantity, current_quantity, cost_price_ghc, supplier_name, is_recalled
+    ) values (
+      p_pharmacy_id, p_item_id, p_destination_location_id, batch_row.batch_no,
+      batch_row.shelf_location, batch_row.expiry_date, p_quantity, p_quantity,
+      batch_row.cost_price_ghc, batch_row.supplier_name, false
+    ) returning id into new_batch_id;
+  end if;
+  insert into public.stock_ledger (
+    pharmacy_id, item_id, batch_id, type, supplier_or_customer, reference_details,
+    batch_no, expiry_date, qty_out, balance_after, recorded_by
+  ) values (
+    p_pharmacy_id, p_item_id, batch_row.id, 'Transfer', source_name,
+    'Transfer to ' || destination_name, batch_row.batch_no, batch_row.expiry_date,
+    p_quantity, item_row.current_balance, p_recorded_by
+  );
+  insert into public.stock_ledger (
+    pharmacy_id, item_id, batch_id, type, supplier_or_customer, reference_details,
+    batch_no, expiry_date, qty_in, balance_after, recorded_by
+  ) values (
+    p_pharmacy_id, p_item_id, new_batch_id, 'Transfer', destination_name,
+    'Transfer from ' || coalesce(source_name, 'Unassigned'), batch_row.batch_no,
+    batch_row.expiry_date, p_quantity, item_row.current_balance, p_recorded_by
+  );
 end;
 $$;
 
@@ -288,7 +593,8 @@ declare
   item_id uuid;
   item_status text;
 begin
-  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id) then
+  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id)
+    and not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
     raise exception 'Pharmacy access denied' using errcode = '42501';
   end if;
   if p_initial_quantity < 0 or p_min_threshold < 0 or p_cost_price < 0 or p_selling_price < 0 then
@@ -308,8 +614,10 @@ begin
     case when p_initial_quantity > 0 then p_expiry_date else null end, item_status
   ) returning id into item_id;
   if p_initial_quantity > 0 then
-    insert into public.batches (pharmacy_id, item_id, batch_no, shelf_location, expiry_date, initial_quantity, current_quantity, cost_price_ghc, supplier_name)
-    values (p_pharmacy_id, item_id, p_batch_no, p_shelf_location, p_expiry_date, p_initial_quantity, p_initial_quantity, p_cost_price, 'Opening balance');
+    insert into public.batches (pharmacy_id, item_id, location_id, batch_no, shelf_location, expiry_date, initial_quantity, current_quantity, cost_price_ghc, supplier_name)
+    values (p_pharmacy_id, item_id,
+      (select id from public.pharmacy_locations where pharmacy_id = p_pharmacy_id order by is_primary desc, created_at limit 1),
+      p_batch_no, p_shelf_location, p_expiry_date, p_initial_quantity, p_initial_quantity, p_cost_price, 'Opening balance');
     insert into public.stock_ledger (pharmacy_id, item_id, type, supplier_or_customer, reference_details, batch_no, expiry_date, qty_in, balance_after, recorded_by)
     values (p_pharmacy_id, item_id, 'Received', 'Opening balance', 'Opening batch', p_batch_no, p_expiry_date, p_initial_quantity, p_initial_quantity, '');
     insert into public.transactions (pharmacy_id, type, item_name, quantity, amount)
@@ -319,9 +627,11 @@ begin
 end;
 $$;
 
-revoke all on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text) from public, anon, authenticated;
-revoke all on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text) from public, anon, authenticated;
+revoke all on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text, uuid) from public, anon, authenticated;
+revoke all on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text, uuid) from public, anon, authenticated;
+revoke all on function public.transfer_stock(uuid, uuid, uuid, uuid, uuid, integer, text) from public, anon, authenticated;
 revoke all on function public.create_inventory_item(uuid, uuid, text, text, text, text, text, integer, text, text, numeric, numeric, integer, text, date) from public, anon, authenticated;
-grant execute on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text) to service_role;
-grant execute on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text) to service_role;
+grant execute on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text, uuid) to service_role;
+grant execute on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text, uuid) to service_role;
+grant execute on function public.transfer_stock(uuid, uuid, uuid, uuid, uuid, integer, text) to service_role;
 grant execute on function public.create_inventory_item(uuid, uuid, text, text, text, text, text, integer, text, text, numeric, numeric, integer, text, date) to service_role;

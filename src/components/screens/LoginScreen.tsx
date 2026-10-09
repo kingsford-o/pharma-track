@@ -5,6 +5,8 @@ interface LoginScreenProps {
   onSubmit: (email: string, password: string, remember: boolean) => Promise<void>;
   onForgotPassword?: () => void;
   onCreateAccount?: () => void;
+  initialEmail?: string;
+  notice?: string;
 }
 
 const POINTS = [
@@ -13,8 +15,8 @@ const POINTS = [
   'Works on your phone at the counter',
 ];
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPassword, onCreateAccount }) => {
-  const [email, setEmail] = useState('');
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPassword, onCreateAccount, initialEmail = '', notice }) => {
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -64,7 +66,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPass
               </svg>
             </div>
             <div>
-              <div className="text-2xl font-bold tracking-tight text-slate-900">Axelle MD</div>
+              <div className="text-2xl font-bold tracking-tight text-slate-900">PharmAsyst</div>
               <div className="text-sm font-medium text-slate-500">Pharmacy management</div>
             </div>
           </div>
@@ -90,6 +92,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPass
 
         <div className="w-full max-w-md justify-self-center rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8 lg:justify-self-end">
           <h2 className="text-center text-xl font-bold text-brand-700">Sign in</h2>
+          {notice && (
+            <div role="status" className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800">
+              {notice}
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="mt-6 space-y-5" noValidate>
             <div>

@@ -8,6 +8,13 @@ import {
   Database,
   X,
   ClipboardList,
+  BarChart3,
+  ShieldAlert,
+  Truck,
+  ShieldCheck,
+  Users,
+  Barcode,
+  Building2,
 } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
 import { useProfile } from '../context/ProfileContext';
@@ -21,6 +28,13 @@ interface SidebarProps {
 const navItems: { id: ActiveScreen; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory', icon: Layers },
+  { id: 'management-insights', label: 'Data Insights Hub', icon: BarChart3 },
+  { id: 'management-safety', label: 'Safety Monitoring', icon: ShieldAlert },
+  { id: 'management-suppliers', label: 'Supplier Management', icon: Truck },
+  { id: 'management-access', label: 'Access Control', icon: ShieldCheck },
+  { id: 'management-patients', label: 'Patient Management', icon: Users },
+  { id: 'management-barcode', label: 'Barcode Scanning', icon: Barcode },
+  { id: 'management-locations', label: 'Multi-Location Support', icon: Building2 },
   { id: 'sales', label: 'Sales & Business', icon: ShoppingCart },
   { id: 'finance', label: 'Finance & Accounts', icon: DollarSign },
   { id: 'reconciliation', label: 'Reconciliation', icon: RefreshCw },
@@ -32,6 +46,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
   const visibleNavItems = profile?.stock_categories.includes('controlled_drugs')
     ? [...navItems, { id: 'controlled-register' as const, label: 'Controlled drug register', icon: ClipboardList }]
     : navItems;
+  const role = profile?.role ?? 'admin';
+  const managementRoles: Partial<Record<ActiveScreen, string[]>> = {
+    'management-insights': ['admin', 'pharmacist', 'inventory_clerk'],
+    'management-safety': ['admin', 'pharmacist'],
+    'management-suppliers': ['admin', 'pharmacist', 'inventory_clerk'],
+    'management-access': ['admin'],
+    'management-patients': ['admin', 'pharmacist'],
+    'management-locations': ['admin', 'pharmacist', 'inventory_clerk'],
+    'management-barcode': ['admin', 'pharmacist', 'inventory_clerk'],
+  };
+  const roleFilteredNavItems = visibleNavItems.filter(({ id }) =>
+    !managementRoles[id] || managementRoles[id].includes(role),
+  );
 
   const handleNavClick = (screen: ActiveScreen) => {
     setActiveScreen(screen);
@@ -66,8 +93,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
                 </svg>
               </div>
               <div>
-                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">Axelle MD</div>
-                <div className="text-[11px] font-medium text-slate-500">Pharmacy management</div>
+                <div className="text-[15px] font-bold leading-tight tracking-tight text-slate-900">PharmAsyst</div>
+                <div className="text-[11px] font-medium text-slate-500">Pharmacy management system</div>
               </div>
             </div>
 
@@ -83,8 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, setMobileOpen }) =
           </div>
 
           {/* Navigation */}
-          <nav className="mt-4 space-y-1 px-3" aria-label="Main">
-            {visibleNavItems.map(({ id, label, icon: Icon }) => {
+          <nav className="mt-4 max-h-[calc(100vh-11rem)] space-y-1 overflow-y-auto px-3 pb-3" aria-label="Main">
+            {roleFilteredNavItems.map(({ id, label, icon: Icon }) => {
               const isActive = activeScreen === id;
               return (
                 <button

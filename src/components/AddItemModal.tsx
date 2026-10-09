@@ -10,6 +10,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
   const { addNewItem } = usePharmacy();
 
   const [name, setName] = useState('');
+  const [barcodeSku, setBarcodeSku] = useState('');
   const [presentation, setPresentation] = useState('Solid Oral');
   const [category, setCategory] = useState('Analgesic');
   const [unit, setUnit] = useState('tabs');
@@ -37,6 +38,7 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
     setError('');
     try {
       await addNewItem({
+        sku: barcodeSku.trim() || undefined,
         name: name.trim(),
         presentation,
         category,
@@ -94,6 +96,17 @@ export const AddItemModal: React.FC<AddItemModalProps> = ({ onClose }) => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1">Product barcode / SKU</label>
+            <input
+              type="text"
+              maxLength={80}
+              value={barcodeSku}
+              onChange={(e) => setBarcodeSku(e.target.value)}
+              placeholder="Optional; enter the printed barcode value for scanning"
+              className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-lg font-mono text-slate-800 focus:outline-none focus:ring-1 focus:ring-teal-500 focus:bg-white"
             />
           </div>
 

@@ -2,6 +2,7 @@ export type TransactionType = 'Received' | 'Dispensed' | 'Adjustment' | 'Transfe
 
 export interface BatchItem {
   id: string;
+  locationId?: string | null;
   batchNo: string;
   shelfLocation: string;
   expiryDate: string; // ISO date or formatted
@@ -10,6 +11,7 @@ export interface BatchItem {
   currentQuantity: number;
   costPriceGhc: number;
   supplierName: string;
+  isRecalled?: boolean;
   isEarliestExpiry?: boolean;
 }
 
@@ -61,4 +63,21 @@ export interface MarketBenchmark {
   lastUpdated: string;
 }
 
-export type ActiveScreen = 'dashboard' | 'receive' | 'dispense' | 'inventory' | 'bincard' | 'controlled-register' | 'sales' | 'finance' | 'reconciliation';
+export type ActiveScreen =
+  | 'dashboard'
+  | 'receive'
+  | 'dispense'
+  | 'inventory'
+  | 'bincard'
+  | 'controlled-register'
+  | 'sales'
+  | 'finance'
+  | 'reconciliation'
+  | 'management'
+  | 'management-insights'
+  | 'management-safety'
+  | 'management-suppliers'
+  | 'management-access'
+  | 'management-patients'
+  | 'management-locations'
+  | 'management-barcode';

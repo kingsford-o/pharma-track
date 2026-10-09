@@ -27,8 +27,36 @@ export async function handleSignup(req: SignupRequest, res: SignupResponse) {
   }
 
   const managerApprovalPassword = process.env.MANAGER_APPROVAL_PASSWORD;
-  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serverSupabaseUrl = process.env.SUPABASE_URL?.trim();
+  const browserSupabaseUrl = process.env.VITE_SUPABASE_URL?.trim();
+  const supabaseUrl = serverSupabaseUrl || browserSupabaseUrl;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const normalizeSupabaseOrigin = (value: string | undefined) => {
+    if (!value) return null;
+    try {
+      const url = new URL(value);
+      if (!['https:', 'http:'].includes(url.protocol)) return null;
+      if (url.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(url.hostname)) return null;
+      return url.origin.toLowerCase();
+    } catch {
+      return null;
+    }
+  };
+  const invalidSupabaseUrl = [serverSupabaseUrl, browserSupabaseUrl]
+    .some((value) => Boolean(value && !normalizeSupabaseOrigin(value)));
+  if (invalidSupabaseUrl) {
+    return res.status(503).json({ error: 'Supabase URL configuration is invalid. Use a valid project URL, and use HTTPS outside local development.' });
+  }
+  if (
+    serverSupabaseUrl &&
+    browserSupabaseUrl &&
+    normalizeSupabaseOrigin(serverSupabaseUrl) !== normalizeSupabaseOrigin(browserSupabaseUrl)
+  ) {
+    return res.status(503).json({
+      error: 'The browser and server are configured for different Supabase projects. Set VITE_SUPABASE_URL and SUPABASE_URL to the same project, then restart the server.',
+    });
+  }
 
   if (!managerApprovalPassword || !supabaseUrl || !serviceRoleKey) {
     return res.status(503).json({ error: 'Account creation is not configured on the server.' });
