@@ -39,7 +39,7 @@ PharmAsyst is a pharmacy management system for Ghanaian pharmacies. It uses Reac
 
 If the app shows **“Secure API setup is incomplete”**, confirm the server has `SUPABASE_URL` (or `VITE_SUPABASE_URL`), `SUPABASE_SERVICE_ROLE_KEY`, and a `SESSION_SECRET` containing at least 32 characters. After changing `.env`, stop and restart `npm run dev`. Get the service-role/secret key from your Supabase project's API settings; do not use the public anon key for `SUPABASE_SERVICE_ROLE_KEY`.
 
-Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where `api/[...path].ts` serves the Express API. The local server launcher is `dev-server.ts` so Vercel does not mistake it for a second production server entry point. The Vercel configuration intentionally does not rewrite `/api/*` to the SPA; API paths must resolve to the serverless function. After changing deployment routing, trigger a new Vercel deployment before testing. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
+Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where the root `server.ts` Express app handles API requests and the Vite build in `dist` serves the frontend. The local server launcher is `dev-server.ts`; Vercel uses the root Express entry point so nested paths such as `/api/auth/session` reach the same API router. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
 
 ## Authentication and data protection
 
