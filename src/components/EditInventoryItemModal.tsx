@@ -3,13 +3,19 @@ import { X, Pencil } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
 import type { FormularyItem } from '../types/pharmacy';
 
+const localDateValue = () => {
+  const date = new Date();
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
+};
+
 interface EditInventoryItemModalProps {
   item: FormularyItem;
   onClose: () => void;
 }
 
 export const EditInventoryItemModal: React.FC<EditInventoryItemModalProps> = ({ item, onClose }) => {
-  const { updateInventoryItem } = usePharmacy();
+  const { updateInventoryItem, adjustStock } = usePharmacy();
   const [name, setName] = useState(item.name);
   const [sku, setSku] = useState(item.sku);
   const [presentation, setPresentation] = useState(item.presentation);
@@ -19,17 +25,64 @@ export const EditInventoryItemModal: React.FC<EditInventoryItemModalProps> = ({ 
   const [formDescription, setFormDescription] = useState(item.formDescription);
   const [costPriceGhc, setCostPriceGhc] = useState(String(item.costPriceGhc));
   const [sellingPriceGhc, setSellingPriceGhc] = useState(String(item.sellingPriceGhc));
+  const [quantity, setQuantity] = useState(String(item.currentBalance));
+  const [savedQuantity, setSavedQuantity] = useState(item.currentBalance);
+  const [adjustmentDate, setAdjustmentDate] = useState(localDateValue);
+  const [batchNo, setBatchNo] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingStock, setSavingStock] = useState(false);
   const [error, setError] = useState('');
+  const [stockError, setStockError] = useState('');
 
-  const quantity = item.currentBalance;
+  const targetQuantity = Number(quantity);
+  const hasValidQuantity = quantity !== '' && Number.isInteger(targetQuantity) && targetQuantity >= 0;
+  const requiresNewBatch = hasValidQuantity && targetQuantity > savedQuantity;
   const threshold = Number(minThreshold);
-  const grade = quantity === 0 ? 'Out of stock' : quantity <= threshold ? 'Low stock' : 'In stock';
-  const gradeClass = quantity === 0
+  const grade = !hasValidQuantity ? 'Enter a valid quantity' : targetQuantity === 0 ? 'Out of stock' : targetQuantity <= threshold ? 'Low stock' : 'In stock';
+  const gradeClass = !hasValidQuantity
+    ? 'text-slate-600 bg-slate-50 border-slate-200'
+    : targetQuantity === 0
     ? 'text-rose-700 bg-rose-50 border-rose-200'
-    : quantity <= threshold
+    : targetQuantity <= threshold
       ? 'text-amber-800 bg-amber-50 border-amber-200'
       : 'text-emerald-800 bg-emerald-50 border-emerald-200';
+  const earliestValidExpiry = new Date();
+  earliestValidExpiry.setDate(earliestValidExpiry.getDate() + 1);
+  const earliestValidExpiryDate = [
+    earliestValidExpiry.getFullYear(),
+    String(earliestValidExpiry.getMonth() + 1).padStart(2, '0'),
+    String(earliestValidExpiry.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  const handleStockAdjustment = async () => {
+    setStockError('');
+    if (!hasValidQuantity) {
+      setStockError('Enter a non-negative whole number for the available quantity.');
+      return;
+    }
+    if (requiresNewBatch && (!batchNo.trim() || !expiryDate)) {
+      setStockError('Enter the new batch number and expiry date before increasing stock.');
+      return;
+    }
+    setSavingStock(true);
+    try {
+      await adjustStock({
+        itemId: item.id,
+        targetQuantity,
+        adjustmentDate,
+        ...(requiresNewBatch ? { batchNo: batchNo.trim(), expiryDate } : {}),
+      });
+      setSavedQuantity(targetQuantity);
+      setQuantity(String(targetQuantity));
+      setBatchNo('');
+      setExpiryDate('');
+    } catch (cause) {
+      setStockError(cause instanceof Error ? cause.message : 'Could not adjust this stock quantity.');
+    } finally {
+      setSavingStock(false);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -68,7 +121,7 @@ export const EditInventoryItemModal: React.FC<EditInventoryItemModalProps> = ({ 
             </div>
             <div>
               <h2 className="text-base font-bold">Edit Inventory Item</h2>
-              <p className="text-xs text-slate-400">Update item details and stock grade threshold</p>
+              <p className="text-xs text-slate-400">Update item details, available quantity, and grade threshold</p>
             </div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close edit item dialog" className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
@@ -77,13 +130,68 @@ export const EditInventoryItemModal: React.FC<EditInventoryItemModalProps> = ({ 
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-between gap-3">
-            <div>
-              <p className="font-bold text-slate-700">Quantity remaining</p>
-              <p className="mt-0.5 text-slate-500">Update quantities through stock receipt, dispensing, or adjustment records.</p>
+          <section className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <label htmlFor="edit-stock-quantity" className="font-bold text-slate-700">Available quantity ({item.unit})</label>
+                <p className="mt-0.5 text-slate-500">Enter the total amount currently on hand.</p>
+              </div>
+              <input
+                id="edit-stock-quantity"
+                aria-label={`Available quantity in ${item.unit}`}
+                type="number"
+                min="0"
+                step="1"
+                required
+                value={quantity}
+                onChange={(event) => {
+                  setQuantity(event.target.value);
+                  setStockError('');
+                }}
+                className={`${inputClass} max-w-32 font-mono text-right`}
+              />
             </div>
-            <span className="shrink-0 font-mono font-bold text-slate-900">{quantity} {item.unit}</span>
-          </div>
+            <div>
+              <label htmlFor="stock-adjustment-date" className="block font-bold text-slate-700 mb-1">Adjustment date</label>
+              <input
+                id="stock-adjustment-date"
+                type="date"
+                max={localDateValue()}
+                required
+                value={adjustmentDate}
+                onChange={(event) => setAdjustmentDate(event.target.value)}
+                className={inputClass}
+              />
+            </div>
+            {requiresNewBatch && (
+              <div className="grid grid-cols-2 gap-3 rounded-lg border border-teal-200 bg-white p-3">
+                <p className="col-span-2 text-slate-600">Increasing quantity creates a new traceable batch. Enter its batch number and expiry date.</p>
+                <div>
+                  <label htmlFor="adjustment-batch-no" className="block font-bold text-slate-700 mb-1">Batch number</label>
+                  <input id="adjustment-batch-no" maxLength={80} value={batchNo} onChange={(event) => setBatchNo(event.target.value)} className={inputClass} />
+                </div>
+                <div>
+                  <label htmlFor="adjustment-expiry-date" className="block font-bold text-slate-700 mb-1">Expiry date</label>
+                  <input id="adjustment-expiry-date" type="date" min={earliestValidExpiryDate} value={expiryDate} onChange={(event) => setExpiryDate(event.target.value)} className={inputClass} />
+                </div>
+              </div>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-slate-600">Grade at {hasValidQuantity ? targetQuantity : '—'} {item.unit}</span>
+                <span className={`px-2 py-1 rounded-full border text-[11px] font-bold ${gradeClass}`}>{grade}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleStockAdjustment()}
+                disabled={savingStock || saving || !hasValidQuantity || (targetQuantity === savedQuantity && !requiresNewBatch)}
+                className="px-3 py-2 text-xs font-bold text-white bg-[#197882] hover:bg-[#14646D] rounded-lg disabled:opacity-60"
+              >
+                {savingStock ? 'Updating stock…' : 'Update stock quantity'}
+              </button>
+            </div>
+            {stockError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{stockError}</p>}
+          </section>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -124,15 +232,11 @@ export const EditInventoryItemModal: React.FC<EditInventoryItemModalProps> = ({ 
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
-            <span className="font-semibold text-slate-600">Grade at {quantity} {item.unit} remaining</span>
-            <span className={`px-2 py-1 rounded-full border text-[11px] font-bold ${gradeClass}`}>{grade}</span>
-          </div>
           {error && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</p>}
 
           <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={saving} className="px-5 py-2 text-xs font-bold text-white bg-[#197882] hover:bg-[#14646D] rounded-lg shadow-sm disabled:opacity-60">
+            <button type="button" onClick={onClose} disabled={saving || savingStock} className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-60">Cancel</button>
+            <button type="submit" disabled={saving || savingStock} className="px-5 py-2 text-xs font-bold text-white bg-[#197882] hover:bg-[#14646D] rounded-lg shadow-sm disabled:opacity-60">
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           </div>

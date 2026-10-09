@@ -31,9 +31,11 @@ const inventoryItem = {
   min_threshold: 10,
   status: 'In stock',
 };
+let pharmacyInsertError: { code: string; message: string; details?: string; hint?: string } | null = null;
 let deletedInventoryItemId: string | null = null;
 let requestedPasswordResetEmail: string | null = null;
 let updatedPassword: string | null = null;
+const stockAdjustmentCalls: { functionName: string; params: Record<string, unknown> }[] = [];
 
 function mockSupabase() {
   return {
@@ -55,15 +57,24 @@ function mockSupabase() {
         },
       },
     },
+    async rpc(functionName: string, params: Record<string, unknown>) {
+      stockAdjustmentCalls.push({ functionName, params });
+      return { data: params.p_target_quantity, error: null };
+    },
     from: (table: string) => ({
       filters: {} as Record<string, unknown>,
       updates: {} as Record<string, unknown>,
+      inserts: {} as Record<string, unknown>,
       deleting: false,
       select() {
         return this;
       },
       update(values: Record<string, unknown>) {
         this.updates = values;
+        return this;
+      },
+      insert(values: Record<string, unknown>) {
+        this.inserts = values;
         return this;
       },
       delete() {
@@ -99,6 +110,12 @@ function mockSupabase() {
             ? staff.find((member) => Object.entries(this.filters).every(([key, value]) => member[key as keyof typeof member] === value)) ?? null
           : null;
         return { data: row, error: null };
+      },
+      async single() {
+        if (table === 'pharmacies' && pharmacyInsertError) {
+          return { data: null, error: pharmacyInsertError };
+        }
+        return { data: null, error: null };
       },
     }),
   } as unknown as SupabaseClient;
@@ -159,11 +176,23 @@ test('login exchanges a valid Supabase access token for an HttpOnly session cook
     body: JSON.stringify({ accessToken: 'valid-token-a' }),
   });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { authenticated: true });
+  assert.deepEqual(await response.json(), { authenticated: true, userId: 'user-a' });
   const cookie = response.headers.get('set-cookie') ?? '';
   assert.match(cookie, /^pharmatrack_session=/);
   assert.match(cookie, /HttpOnly/);
   assert.match(cookie, /SameSite=Strict/);
+
+  const session = await fetch(`${baseUrl}/api/auth/session`, {
+    headers: { Cookie: cookie.split(';')[0] },
+  });
+  assert.equal(session.status, 200);
+  assert.deepEqual(await session.json(), { authenticated: true, userId: 'user-a' });
+});
+
+test('session check returns an unauthenticated result without a browser error when signed out', async () => {
+  const response = await fetch(`${baseUrl}/api/auth/session`);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { authenticated: false });
 });
 
 test('login rejects an invalid Supabase access token', async () => {
@@ -233,6 +262,39 @@ test('access control requires a session and scopes pharmacy reads to the session
   const result = await response.json() as { profile: { owner_id: string } | null };
   assert.equal(result.profile?.owner_id, 'user-a');
   assert.notEqual(result.profile?.owner_id, 'user-b');
+});
+
+test('pharmacy setup clears an invalid session when its owner is missing from Supabase Auth', async () => {
+  pharmacyInsertError = {
+    code: '23503',
+    message: 'insert or update on table "pharmacies" violates foreign key constraint "pharmacies_owner_id_fkey"',
+    details: 'Key (owner_id)=(user-a) is not present in table "users".',
+  };
+  try {
+    const login = await fetch(`${baseUrl}/api/auth/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accessToken: 'valid-token-a' }),
+    });
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+    const response = await fetch(`${baseUrl}/api/pharmacy`, {
+      method: 'POST',
+      headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Test Pharmacy',
+        manager_name: 'Manager A',
+        inventory_size: 'small',
+        stock_categories: ['over_the_counter'],
+      }),
+    });
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), {
+      error: 'Your sign-in is no longer valid for this Supabase project. Refresh the page and sign in again.',
+    });
+    assert.match(response.headers.get('set-cookie') ?? '', /pharmatrack_session=;.*Max-Age=0/);
+  } finally {
+    pharmacyInsertError = null;
+  }
 });
 
 test('unknown API routes return JSON instead of the SPA HTML fallback', async () => {
@@ -384,6 +446,48 @@ test('inventory item edits save catalog details and grade against quantity remai
   assert.equal(inventoryItem.min_threshold, 12);
   assert.equal(inventoryItem.status, 'Low stock');
   assert.equal(inventoryItem.name, 'Paracetamol 500mg');
+});
+
+test('inventory stock adjustments set an exact quantity and require batch details for increases', async () => {
+  stockAdjustmentCalls.length = 0;
+  const adjustmentDate = new Date().toISOString().slice(0, 10);
+  const login = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-a' }),
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
+
+  const missingBatch = await fetch(`${baseUrl}/api/inventory/item-a/adjust`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ targetQuantity: 15, adjustmentDate }),
+  });
+  assert.equal(missingBatch.status, 400);
+  assert.deepEqual(await missingBatch.json(), {
+    error: 'To increase stock, enter the new batch number and its future expiry date.',
+  });
+  assert.equal(stockAdjustmentCalls.length, 0);
+
+  const response = await fetch(`${baseUrl}/api/inventory/item-a/adjust`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ targetQuantity: 0, adjustmentDate }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { success: true, quantity: 0 });
+  assert.equal(stockAdjustmentCalls[0]?.functionName, 'adjust_stock');
+  assert.deepEqual(stockAdjustmentCalls[0]?.params, {
+    p_owner_id: 'user-a',
+    p_pharmacy_id: 'pharmacy-a',
+    p_item_id: 'item-a',
+    p_target_quantity: 0,
+    p_batch_no: '',
+    p_expiry_date: null,
+    p_adjustment_date: adjustmentDate,
+    p_recorded_by: 'Manager A',
+  });
 });
 
 test('inventory item deletion is pharmacy-scoped and returns success for an existing item', async () => {

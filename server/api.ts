@@ -312,14 +312,25 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         return;
       }
       res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${signSession(userId, sessionSecret!, remember)}; ${cookieOptions(remember)}`);
-      res.json({ authenticated: true });
+      res.json({ authenticated: true, userId });
     } catch (error) {
       next(error);
     }
   });
 
-  app.get('/api/auth/session', requireConfiguration, authenticate, (_req, res) => {
-    res.json({ authenticated: true, userId: res.locals.userId });
+  app.get('/api/auth/session', requireConfiguration, (req, res) => {
+    const cookie = (req.headers.cookie ?? '')
+      .split(';')
+      .map((part) => part.trim())
+      .find((part) => part.startsWith(`${SESSION_COOKIE}=`));
+    const token = cookie?.slice(SESSION_COOKIE.length + 1);
+    const payload = token && sessionSecret ? verifySession(token, sessionSecret) : null;
+    if (!payload) {
+      if (token) res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; ${clearCookieOptions}`);
+      res.json({ authenticated: false });
+      return;
+    }
+    res.json({ authenticated: true, userId: payload.sub });
   });
 
   app.get('/api/users/me', requireConfiguration, authenticate, async (_req, res, next) => {
@@ -439,7 +450,22 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
           res.status(409).json({ error: 'Your account already has a pharmacy profile.' });
           return;
         }
-        console.error('Pharmacy creation failed:', error.message);
+        if (error.code === '23503' && error.message.includes('pharmacies_owner_id_fkey')) {
+          console.error('Pharmacy creation failed because the session user is missing from this Supabase project:', {
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+          });
+          res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; ${clearCookieOptions}`);
+          res.status(401).json({ error: 'Your sign-in is no longer valid for this Supabase project. Refresh the page and sign in again.' });
+          return;
+        }
+        console.error('Pharmacy creation failed:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+        });
         res.status(500).json({ error: 'We could not save your pharmacy profile.' });
         return;
       }
@@ -652,6 +678,73 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         return;
       }
       res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/inventory/:itemId/adjust', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const body = req.body as Record<string, unknown>;
+      if (
+        !isRecord(body) ||
+        !validNumber(body.targetQuantity) ||
+        !Number.isInteger(body.targetQuantity) ||
+        !validDateOnly(body.adjustmentDate) ||
+        (body.batchNo !== undefined && !validText(body.batchNo, 80)) ||
+        (body.expiryDate !== undefined && !validDateOnly(body.expiryDate))
+      ) {
+        res.status(400).json({ error: 'Enter a valid non-negative whole-number stock quantity and adjustment date.' });
+        return;
+      }
+
+      const { data: existingItem, error: lookupError } = await supabase!.from('formulary_items')
+        .select('current_balance')
+        .eq('pharmacy_id', profile.id)
+        .eq('id', req.params.itemId)
+        .maybeSingle();
+      if (lookupError) {
+        console.error('Stock adjustment item lookup failed:', lookupError.message);
+        res.status(500).json({ error: 'We could not load this inventory item.' });
+        return;
+      }
+      if (!existingItem) {
+        res.status(404).json({ error: 'This medicine is not in your pharmacy inventory.' });
+        return;
+      }
+      if (body.targetQuantity > Number(existingItem.current_balance) && (!body.batchNo || !body.expiryDate)) {
+        res.status(400).json({ error: 'To increase stock, enter the new batch number and its future expiry date.' });
+        return;
+      }
+
+      const { data, error } = await supabase!.rpc('adjust_stock', {
+        p_owner_id: res.locals.userId,
+        p_pharmacy_id: profile.id,
+        p_item_id: req.params.itemId,
+        p_target_quantity: body.targetQuantity,
+        p_batch_no: typeof body.batchNo === 'string' ? body.batchNo.trim().toUpperCase() : '',
+        p_expiry_date: typeof body.expiryDate === 'string' ? body.expiryDate : null,
+        p_adjustment_date: body.adjustmentDate,
+        p_recorded_by: profile.manager_name,
+      });
+      if (error) {
+        console.error('Stock adjustment failed:', error.message);
+        const message = error.message.toLowerCase();
+        const userMessage = error.code === 'P0002'
+          ? 'This medicine or its stock location could not be found.'
+          : message.includes('adjustment date')
+            ? 'The adjustment date cannot be in the future.'
+            : message.includes('expiry')
+              ? 'An increase requires a batch number and future expiry date.'
+              : message.includes('batch stock')
+                ? 'The recorded batch quantities do not cover the current stock balance. Reconcile batches before adjusting stock.'
+                : 'We could not adjust this stock quantity. Check the amount and try again.';
+        res.status(error.code === 'P0002' ? 404 : 400).json({ error: userMessage });
+        return;
+      }
+      res.json({ success: true, quantity: data });
     } catch (error) {
       next(error);
     }

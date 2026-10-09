@@ -4,7 +4,7 @@ import { LoginScreen } from './screens/LoginScreen';
 import { AccountCreationScreen } from './screens/AccountCreationScreen';
 import { PasswordActionModal } from './PasswordActionModal';
 import { ProfileProvider, ProfileGate } from '../context/ProfileContext';
-import { ApiError, apiGet, apiPost } from '../services/api';
+import { apiGet, apiPost } from '../services/api';
 
 /** Uses the signed HttpOnly server cookie as the persistent app session. */
 export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -22,12 +22,12 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
         setPasswordRecoveryToken(session.access_token);
       }
     });
-    apiGet<{ authenticated: true; userId: string }>('/api/auth/session')
-      .then((session) => setUserId(session.userId))
+    apiGet<{ authenticated: boolean; userId?: string }>('/api/auth/session')
+      .then((session) => {
+        if (session.authenticated && session.userId) setUserId(session.userId);
+      })
       .catch((error: unknown) => {
-        if (!(error instanceof ApiError) || error.status !== 401) {
-          setSessionError(error instanceof Error ? error.message : 'We could not verify your secure session.');
-        }
+        setSessionError(error instanceof Error ? error.message : 'We could not verify your secure session.');
       })
       .finally(() => setChecking(false));
     return () => subscription.unsubscribe();

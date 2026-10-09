@@ -489,6 +489,107 @@ begin
 end;
 $$;
 
+drop function if exists public.adjust_stock(uuid, uuid, uuid, integer, text, date, text);
+drop function if exists public.adjust_stock(uuid, uuid, uuid, integer, text, date, date, text);
+create or replace function public.adjust_stock(
+  p_owner_id uuid,
+  p_pharmacy_id uuid,
+  p_item_id uuid,
+  p_target_quantity integer,
+  p_batch_no text,
+  p_expiry_date date,
+  p_adjustment_date date,
+  p_recorded_by text
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  item_row public.formulary_items%rowtype;
+  batch_row public.batches%rowtype;
+  delta integer;
+  remaining integer;
+  new_batch_id uuid;
+  target_location_id uuid;
+begin
+  if not exists (select 1 from public.pharmacies where id = p_pharmacy_id and owner_id = p_owner_id)
+    and not exists (select 1 from public.pharmacy_staff where pharmacy_id = p_pharmacy_id and user_id = p_owner_id and active) then
+    raise exception 'Pharmacy access denied' using errcode = '42501';
+  end if;
+  if p_target_quantity < 0 then
+    raise exception 'Target stock quantity cannot be negative' using errcode = '22023';
+  end if;
+  if p_adjustment_date is null or p_adjustment_date > current_date then
+    raise exception 'Adjustment date cannot be in the future' using errcode = '22023';
+  end if;
+
+  select * into item_row from public.formulary_items
+    where id = p_item_id and pharmacy_id = p_pharmacy_id for update;
+  if not found then raise exception 'Medicine not found' using errcode = 'P0002'; end if;
+  delta := p_target_quantity - item_row.current_balance;
+  if delta = 0 then return p_target_quantity; end if;
+
+  if delta > 0 then
+    if coalesce(trim(p_batch_no), '') = '' or p_expiry_date is null or p_expiry_date <= current_date then
+      raise exception 'An increase requires a batch number and future expiry date' using errcode = '22023';
+    end if;
+    select id into target_location_id from public.pharmacy_locations
+      where pharmacy_id = p_pharmacy_id
+      order by is_primary desc, created_at
+      limit 1;
+    if target_location_id is null then raise exception 'Stock location not found' using errcode = 'P0002'; end if;
+    insert into public.batches (
+      pharmacy_id, item_id, location_id, batch_no, shelf_location, expiry_date,
+      initial_quantity, current_quantity, cost_price_ghc, supplier_name
+    ) values (
+      p_pharmacy_id, p_item_id, target_location_id, trim(p_batch_no), item_row.shelf_location,
+      p_expiry_date, delta, delta, item_row.cost_price_ghc, 'Physical count adjustment'
+    ) returning id into new_batch_id;
+  else
+    remaining := -delta;
+    for batch_row in
+      select * from public.batches
+      where item_id = p_item_id and pharmacy_id = p_pharmacy_id and current_quantity > 0
+      order by expiry_date, created_at
+      for update
+    loop
+      exit when remaining = 0;
+      delta := least(remaining, batch_row.current_quantity);
+      update public.batches set current_quantity = current_quantity - delta where id = batch_row.id;
+      remaining := remaining - delta;
+    end loop;
+    if remaining > 0 then
+      raise exception 'Physical count adjustment exceeds recorded batch stock' using errcode = '22023';
+    end if;
+  end if;
+
+  update public.formulary_items set
+    current_balance = p_target_quantity,
+    earliest_expiry = (select min(expiry_date) from public.batches where item_id = p_item_id and current_quantity > 0),
+    status = case
+      when p_target_quantity = 0 then 'Out of stock'
+      when p_target_quantity <= item_row.min_threshold then 'Low stock'
+      else 'In stock'
+    end
+    where id = p_item_id;
+
+  insert into public.stock_ledger (
+    pharmacy_id, item_id, batch_id, type, supplier_or_customer, reference_details,
+    batch_no, expiry_date, qty_in, qty_out, balance_after, recorded_by, created_at
+  ) values (
+    p_pharmacy_id, p_item_id, new_batch_id, 'Adjustment', 'Physical count',
+    'Physical count adjusted from ' || item_row.current_balance || ' to ' || p_target_quantity,
+    case when new_batch_id is not null then trim(p_batch_no) else '' end,
+    case when new_batch_id is not null then p_expiry_date else null end,
+    case when p_target_quantity > item_row.current_balance then p_target_quantity - item_row.current_balance else null end,
+    case when p_target_quantity < item_row.current_balance then item_row.current_balance - p_target_quantity else null end,
+    p_target_quantity, p_recorded_by, p_adjustment_date::timestamptz
+  );
+  return p_target_quantity;
+end;
+$$;
+
 create or replace function public.transfer_stock(
   p_owner_id uuid,
   p_pharmacy_id uuid,
@@ -629,9 +730,11 @@ $$;
 
 revoke all on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text, uuid) from public, anon, authenticated;
 revoke all on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text, uuid) from public, anon, authenticated;
+revoke all on function public.adjust_stock(uuid, uuid, uuid, integer, text, date, date, text) from public, anon, authenticated;
 revoke all on function public.transfer_stock(uuid, uuid, uuid, uuid, uuid, integer, text) from public, anon, authenticated;
 revoke all on function public.create_inventory_item(uuid, uuid, text, text, text, text, text, integer, text, text, numeric, numeric, integer, text, date) from public, anon, authenticated;
 grant execute on function public.receive_stock(uuid, uuid, uuid, text, text, date, integer, integer, numeric, numeric, text, uuid) to service_role;
 grant execute on function public.dispense_stock(uuid, uuid, uuid, integer, text, text, text, uuid) to service_role;
+grant execute on function public.adjust_stock(uuid, uuid, uuid, integer, text, date, date, text) to service_role;
 grant execute on function public.transfer_stock(uuid, uuid, uuid, uuid, uuid, integer, text) to service_role;
 grant execute on function public.create_inventory_item(uuid, uuid, text, text, text, text, text, integer, text, text, numeric, numeric, integer, text, date) to service_role;

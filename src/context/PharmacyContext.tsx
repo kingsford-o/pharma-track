@@ -27,6 +27,14 @@ interface DispenseStockParams {
   recordedBy?: string;
 }
 
+interface AdjustStockParams {
+  itemId: string;
+  targetQuantity: number;
+  adjustmentDate: string;
+  batchNo?: string;
+  expiryDate?: string;
+}
+
 type NewItem = Omit<FormularyItem, 'id' | 'currentBalance' | 'batches' | 'status' | 'earliestExpiry' | 'sku'> & {
   sku?: string;
   initialQuantity?: number;
@@ -45,6 +53,7 @@ interface PharmacyContextType {
   selectedItem: FormularyItem | undefined;
   receiveStock: (params: ReceiveStockParams) => Promise<{ success: boolean; message: string }>;
   dispenseStock: (params: DispenseStockParams) => Promise<{ success: boolean; message: string }>;
+  adjustStock: (params: AdjustStockParams) => Promise<void>;
   addNewItem: (item: NewItem) => Promise<void>;
   updateInventoryItem: (item: FormularyItem) => Promise<void>;
   deleteInventoryItem: (item: FormularyItem) => Promise<void>;
@@ -177,6 +186,25 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const adjustStock: PharmacyContextType['adjustStock'] = async (params) => {
+    try {
+      await apiPost<{ success: boolean; quantity: number }>(
+        `/api/inventory/${encodeURIComponent(params.itemId)}/adjust`,
+        params,
+      );
+      await reloadInventory();
+      const item = items.find((candidate) => candidate.id === params.itemId);
+      setNotification({
+        type: 'success',
+        message: `${item?.name ?? 'Stock quantity'} adjusted and inventory grade recalculated.`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'We could not adjust this stock quantity.';
+      setNotification({ type: 'error', message });
+      throw new Error(message);
+    }
+  };
+
   const addNewItem: PharmacyContextType['addNewItem'] = async (item) => {
     try {
       await apiPost('/api/inventory', {
@@ -239,6 +267,7 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         selectedItem,
         receiveStock,
         dispenseStock,
+        adjustStock,
         addNewItem,
         updateInventoryItem,
         deleteInventoryItem,

@@ -57,6 +57,7 @@ Deploy the Node/Express server and built React app together on a Node.js host, o
 - Dashboard starter-formulary suggestions are filtered by those categories. Adding a suggestion sends it to the inventory API as a new item with **zero opening stock** and no fabricated price. Suggestions are generic items only; verify choices, registration, and local suitability before dispensing.
 - Dashboard KPIs, charts, restocking alerts, and category summaries use that pharmacy's actual saved inventory and transactions. Empty values are zero and empty states are explicit.
 - Receiving stock records the supplier, batch, expiry, and quantity. Dispensing verifies stock and deducts earliest-expiry eligible batches first (FEFO).
+- Editing an item's available quantity records an audited physical-count adjustment dated to today by default. Decreases are removed from batches in expiry order; increases require a batch number and future expiry date so they remain traceable for dispensing. Stock grade updates from the resulting quantity and minimum threshold.
 - Sales, Finance, and Reconciliation are functional views backed by saved transactions and inventory/batch records.
 - Market benchmarks are read from the `market_benchmarks` table; the app does not present hard-coded benchmark prices.
 
@@ -73,9 +74,9 @@ Barcode scanning matches the scanned value to the item's SKU. Receipt and SKU-la
 - `POST /api/auth/session`, `GET /api/auth/session`, `DELETE /api/auth/session` — establish, inspect, and clear the secure session.
 - `GET /api/users/me`, `PATCH /api/users/me` — read or update the signed-in user's profile.
 - `GET /api/pharmacy`, `POST /api/pharmacy` — read or create the signed-in user's pharmacy profile.
-- `GET /api/inventory`, `POST /api/inventory`, `PATCH /api/inventory/:itemId`, `DELETE /api/inventory/:itemId` — read, add, edit, or permanently delete formulary items. Deletion also removes the item's batches and stock ledger history; stock quantity remains controlled by ledger transactions.
+- `GET /api/inventory`, `POST /api/inventory`, `PATCH /api/inventory/:itemId`, `DELETE /api/inventory/:itemId` — read, add, edit, or permanently delete formulary items. Deletion also removes the item's batches and stock ledger history; stock quantity is changed by ledger transactions.
 - `GET /api/locations` — list the signed-in pharmacy's locations for local receiving and dispensing.
-- `POST /api/inventory/:itemId/receive`, `POST /api/inventory/:itemId/dispense` — transactionally update batches, stock ledger, and financial transactions.
+- `POST /api/inventory/:itemId/receive`, `POST /api/inventory/:itemId/dispense`, `POST /api/inventory/:itemId/adjust` — transactionally update batches and stock ledger; receiving and dispensing also update financial transactions.
 - `GET /api/transactions`, `GET /api/market-prices` — retrieve the signed-in pharmacy's transactions or configured market benchmarks.
 - `/api/management/*` — pharmacy insights, staff roles, patient/prescription records, suppliers, delivery tracking, locations, stock transfers, and batch recalls. Patient routes are restricted to pharmacists and administrators; staff and location administration is restricted to administrators.
 - `GET /api/health` — service health check.
