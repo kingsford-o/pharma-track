@@ -39,7 +39,7 @@ Axelle MD is a pharmacy management system for Ghanaian pharmacies. It uses React
 
 If the app shows **“Secure API setup is incomplete”**, confirm the server has `SUPABASE_URL` (or `VITE_SUPABASE_URL`), `SUPABASE_SERVICE_ROLE_KEY`, and a `SESSION_SECRET` containing at least 32 characters. After changing `.env`, stop and restart `npm run dev`. Get the service-role/secret key from your Supabase project's API settings; do not use the public anon key for `SUPABASE_SERVICE_ROLE_KEY`.
 
-Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where `api/[...path].ts` forwards API requests to the Express app while the Vite build in `dist` serves the frontend. Keep the Vercel `outputDirectory` set to `dist` so the static app and API function are both deployed. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
+Deploy the Node/Express server and built React app together on a Node.js host, or deploy to Vercel, where files under `api/` provide explicit entry points for every API route and forward requests to the shared Express app; the Vite build in `dist` serves the frontend. Keep the Vercel `outputDirectory` set to `dist` so the static app and API functions are both deployed. Configure the same environment variables in the hosting provider. Production session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`.
 
 ## Authentication and data protection
 

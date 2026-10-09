@@ -5,7 +5,8 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createPharmaTrackApp } from '../server/app';
-import deploymentHandler from '../api/[...path]';
+import deploymentHandler from '../api/auth/session';
+import inventoryReceiveHandler from '../api/inventory/[itemId]/receive';
 
 const pharmacies = [
   { id: 'pharmacy-a', owner_id: 'user-a', name: 'A Pharmacy', manager_name: 'Manager A', inventory_size: 'small', stock_categories: ['over_the_counter'] },
@@ -192,7 +193,7 @@ test('unknown API routes return JSON instead of the SPA HTML fallback', async ()
   assert.deepEqual(await response.json(), { error: 'API endpoint not found.' });
 });
 
-test('deployment entry point routes nested session requests to the Express API', async () => {
+test('Vercel session function routes nested requests to the Express API', async () => {
   const deploymentServer = createServer(deploymentHandler);
   await new Promise<void>((resolve) => deploymentServer.listen(0, '127.0.0.1', resolve));
   const address = deploymentServer.address() as AddressInfo;
@@ -202,6 +203,25 @@ test('deployment entry point routes nested session requests to the Express API',
     });
     assert.match(response.headers.get('content-type') ?? '', /application\/json/);
     assert.ok(response.status === 401 || response.status === 503);
+    assert.equal(typeof (await response.json() as { error?: unknown }).error, 'string');
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      deploymentServer.close((error) => error ? reject(error) : resolve()),
+    );
+  }
+});
+
+test('Vercel dynamic inventory function routes nested requests to the Express API', async () => {
+  const deploymentServer = createServer(inventoryReceiveHandler);
+  await new Promise<void>((resolve) => deploymentServer.listen(0, '127.0.0.1', resolve));
+  const address = deploymentServer.address() as AddressInfo;
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/inventory/item-123/receive`, {
+      method: 'POST',
+      headers: { Connection: 'close' },
+    });
+    assert.ok(response.status === 401 || response.status === 503);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
     assert.equal(typeof (await response.json() as { error?: unknown }).error, 'string');
   } finally {
     await new Promise<void>((resolve, reject) =>
