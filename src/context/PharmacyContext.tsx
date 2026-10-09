@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { FormularyItem, LedgerTransaction, MarketBenchmark, ActiveScreen } from '../types/pharmacy';
-import { apiGet, apiPost } from '../services/api';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../services/api';
 import { useProfile } from './ProfileContext';
 
 interface ReceiveStockParams {
@@ -46,6 +46,8 @@ interface PharmacyContextType {
   receiveStock: (params: ReceiveStockParams) => Promise<{ success: boolean; message: string }>;
   dispenseStock: (params: DispenseStockParams) => Promise<{ success: boolean; message: string }>;
   addNewItem: (item: NewItem) => Promise<void>;
+  updateInventoryItem: (item: FormularyItem) => Promise<void>;
+  deleteInventoryItem: (item: FormularyItem) => Promise<void>;
   getMarketBenchmark: (itemName: string) => MarketBenchmark | undefined;
   isSupabaseConnected: boolean;
   isSchemaModalOpen: boolean;
@@ -88,7 +90,7 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setLedger(data.ledger);
     setIsSupabaseConnected(true);
     setSyncTimestamp(new Date().toLocaleString());
-    setSelectedItemId((current) => current || data.items[0]?.id || '');
+    setSelectedItemId((current) => data.items.some((item) => item.id === current) ? current : data.items[0]?.id || '');
   }, []);
 
   useEffect(() => {
@@ -190,6 +192,40 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  const updateInventoryItem: PharmacyContextType['updateInventoryItem'] = async (item) => {
+    try {
+      await apiPatch(`/api/inventory/${encodeURIComponent(item.id)}`, {
+        sku: item.sku,
+        name: item.name,
+        presentation: item.presentation,
+        category: item.category,
+        minThreshold: item.minThreshold,
+        shelfLocation: item.shelfLocation,
+        formDescription: item.formDescription,
+        costPriceGhc: item.costPriceGhc,
+        sellingPriceGhc: item.sellingPriceGhc,
+      });
+      await reloadInventory();
+      setNotification({ type: 'success', message: `${item.name} updated. Stock grade recalculated from the remaining quantity.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'We could not update this medicine.';
+      setNotification({ type: 'error', message });
+      throw new Error(message);
+    }
+  };
+
+  const deleteInventoryItem: PharmacyContextType['deleteInventoryItem'] = async (item) => {
+    try {
+      await apiDelete(`/api/inventory/${encodeURIComponent(item.id)}`);
+      await reloadInventory();
+      setNotification({ type: 'success', message: `${item.name} and its stock and ledger history were permanently deleted.` });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'We could not delete this medicine.';
+      setNotification({ type: 'error', message });
+      throw new Error(message);
+    }
+  };
+
   return (
     <PharmacyContext.Provider
       value={{
@@ -204,6 +240,8 @@ export const PharmacyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         receiveStock,
         dispenseStock,
         addNewItem,
+        updateInventoryItem,
+        deleteInventoryItem,
         getMarketBenchmark,
         isSupabaseConnected,
         isSchemaModalOpen,

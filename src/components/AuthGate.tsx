@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase, supabaseConfigurationError } from '../lib/supabaseClient';
 import { LoginScreen } from './screens/LoginScreen';
 import { AccountCreationScreen } from './screens/AccountCreationScreen';
+import { PasswordActionModal } from './PasswordActionModal';
 import { ProfileProvider, ProfileGate } from '../context/ProfileContext';
 import { ApiError, apiGet, apiPost } from '../services/api';
 
@@ -12,8 +13,15 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const [creatingAccount, setCreatingAccount] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState('');
   const [sessionError, setSessionError] = useState('');
+  const [passwordResetEmail, setPasswordResetEmail] = useState<string | null>(null);
+  const [passwordRecoveryToken, setPasswordRecoveryToken] = useState<string | null>(null);
 
   useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY' && session?.access_token) {
+        setPasswordRecoveryToken(session.access_token);
+      }
+    });
     apiGet<{ authenticated: true; userId: string }>('/api/auth/session')
       .then((session) => setUserId(session.userId))
       .catch((error: unknown) => {
@@ -22,6 +30,7 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
         }
       })
       .finally(() => setChecking(false));
+    return () => subscription.unsubscribe();
   }, []);
 
   const establishSession = async (email: string, password: string, remember = true) => {
@@ -79,21 +88,31 @@ export const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) 
             setCreatingAccount(true);
           }}
           onSubmit={establishSession}
-          onForgotPassword={async () => {
-            if (supabaseConfigurationError) {
-              window.alert(supabaseConfigurationError);
-              return;
-            }
-            const email = window.prompt('Enter your account email');
-            if (!email) return;
-            const { error } = await supabase.auth.resetPasswordForEmail(email.trim());
-            window.alert(
-              error
-                ? 'We could not send the reset email. Check the address and try again.'
-                : 'Check your email for a reset link.',
-            );
-          }}
+          onForgotPassword={(email) => setPasswordResetEmail(email)}
         />
+        {passwordResetEmail !== null && (
+          <PasswordActionModal
+            mode="request"
+            initialEmail={passwordResetEmail}
+            onClose={() => setPasswordResetEmail(null)}
+            onComplete={() => undefined}
+          />
+        )}
+        {passwordRecoveryToken && (
+          <PasswordActionModal
+            mode="reset"
+            accessToken={passwordRecoveryToken}
+            onClose={() => {
+              setPasswordRecoveryToken(null);
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+            }}
+            onComplete={(nextUserId) => {
+              setPasswordRecoveryToken(null);
+              setUserId(nextUserId);
+              window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+            }}
+          />
+        )}
       </>
     );
   }

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Building2, ChevronDown, Menu, Database, LogOut } from 'lucide-react';
+import { Search, Building2, ChevronDown, Menu, Database, LogOut, X, AlertCircle } from 'lucide-react';
 import { usePharmacy } from '../context/PharmacyContext';
 import { useProfile } from '../context/ProfileContext';
 import { supabase } from '../lib/supabaseClient';
@@ -25,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
 
   const searchRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
@@ -38,7 +39,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
       window.location.reload();
     } catch (error) {
       console.error('Could not complete secure sign-out:', error);
-      window.alert('Secure sign-out could not be completed. Check your connection and try again.');
+      setSignOutError('Secure sign-out could not be completed. Check your connection and try again.');
     }
   };
 
@@ -84,6 +85,7 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
     .toUpperCase();
 
   return (
+    <>
     <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur sm:px-6">
       {/* Menu + search */}
       <div className="flex max-w-xl flex-1 items-center gap-2">
@@ -207,5 +209,27 @@ export const Header: React.FC<HeaderProps> = ({ onMenuClick }) => {
         </div>
       </div>
     </header>
+    {signOutError && (
+      <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+        <section role="alertdialog" aria-modal="true" aria-labelledby="signout-error-title" className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+          <header className="flex items-center justify-between bg-slate-900 px-6 py-4 text-white">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5 text-rose-300" />
+              <h2 id="signout-error-title" className="font-bold">Could not sign out</h2>
+            </div>
+            <button type="button" onClick={() => setSignOutError('')} aria-label="Close message" className="rounded-lg p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </header>
+          <div className="space-y-4 p-6">
+            <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-relaxed text-rose-800">{signOutError}</p>
+            <div className="flex justify-end">
+              <button type="button" onClick={() => setSignOutError('')} className="rounded-lg bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-700">Close</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    )}
+    </>
   );
 };

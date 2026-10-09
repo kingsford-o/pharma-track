@@ -73,7 +73,7 @@ Barcode scanning matches the scanned value to the item's SKU. Receipt and SKU-la
 - `POST /api/auth/session`, `GET /api/auth/session`, `DELETE /api/auth/session` — establish, inspect, and clear the secure session.
 - `GET /api/users/me`, `PATCH /api/users/me` — read or update the signed-in user's profile.
 - `GET /api/pharmacy`, `POST /api/pharmacy` — read or create the signed-in user's pharmacy profile.
-- `GET /api/inventory`, `POST /api/inventory` — read inventory and add a formulary item.
+- `GET /api/inventory`, `POST /api/inventory`, `PATCH /api/inventory/:itemId`, `DELETE /api/inventory/:itemId` — read, add, edit, or permanently delete formulary items. Deletion also removes the item's batches and stock ledger history; stock quantity remains controlled by ledger transactions.
 - `GET /api/locations` — list the signed-in pharmacy's locations for local receiving and dispensing.
 - `POST /api/inventory/:itemId/receive`, `POST /api/inventory/:itemId/dispense` — transactionally update batches, stock ledger, and financial transactions.
 - `GET /api/transactions`, `GET /api/market-prices` — retrieve the signed-in pharmacy's transactions or configured market benchmarks.

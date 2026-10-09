@@ -4,6 +4,9 @@ import {
   Plus, 
   Layers, 
   FileText, 
+  Pencil,
+  Trash2,
+  X,
   Calendar, 
   Check, 
   AlertTriangle,
@@ -11,6 +14,8 @@ import {
 } from 'lucide-react';
 import { usePharmacy } from '../../context/PharmacyContext';
 import { AddItemModal } from '../AddItemModal';
+import { EditInventoryItemModal } from '../EditInventoryItemModal';
+import type { FormularyItem } from '../../types/pharmacy';
 
 type FilterTab = 'all' | 'low_stock' | 'expiring_soon' | 'out_of_stock';
 
@@ -18,10 +23,14 @@ const isExpiringSoon = (item: { batches: { currentQuantity: number; expiryDaysLe
   item.batches.some((batch) => batch.currentQuantity > 0 && batch.expiryDaysLeft >= 0 && batch.expiryDaysLeft <= 90);
 
 export const InventoryScreen: React.FC = () => {
-  const { items, setSelectedItemId, setActiveScreen, syncTimestamp } = usePharmacy();
+  const { items, setSelectedItemId, setActiveScreen, syncTimestamp, deleteInventoryItem } = usePharmacy();
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [itemToEdit, setItemToEdit] = useState<FormularyItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<FormularyItem | null>(null);
+  const [isDeletingItemId, setIsDeletingItemId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState('');
 
   // Dynamic counts
   const lowStockCount = items.filter(i => i.currentBalance > 0 && i.currentBalance <= i.minThreshold).length;
@@ -60,6 +69,21 @@ export const InventoryScreen: React.FC = () => {
   const handleOpenBinCard = (itemId: string) => {
     setSelectedItemId(itemId);
     setActiveScreen('bincard');
+  };
+
+  const handleDeleteItem = async () => {
+    if (!itemToDelete) return;
+    const item = itemToDelete;
+    setIsDeletingItemId(item.id);
+    setDeleteError('');
+    try {
+      await deleteInventoryItem(item);
+      setItemToDelete(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'We could not delete this medicine.');
+    } finally {
+      setIsDeletingItemId(null);
+    }
   };
 
   return (
@@ -173,7 +197,7 @@ export const InventoryScreen: React.FC = () => {
                 <th className="py-3 px-3 text-center">Balance</th>
                 <th className="py-3 px-3 text-center">Minimum Level</th>
                 <th className="py-3 px-3 text-center">Earliest Expiry</th>
-                <th className="py-3 px-3 text-center">Status</th>
+                <th className="py-3 px-3 text-center">Stock grade</th>
                 <th className="py-3 px-3 text-right">Cost Price (GH₵)</th>
                 <th className="py-3 px-3 text-right">Selling Price (GH₵)</th>
                 <th className="py-3 px-4 sm:px-6 text-center">Action</th>
@@ -183,7 +207,7 @@ export const InventoryScreen: React.FC = () => {
               {filteredItems.map((item) => {
                 const isOutOfStock = item.currentBalance === 0;
                 const isLow = item.currentBalance > 0 && item.currentBalance <= item.minThreshold;
-                const isExpiring = item.status === 'Expiring soon';
+                const isExpiring = isExpiringSoon(item);
 
                 // Color accent bar on left edge
                 const borderIndicator = isOutOfStock 
@@ -234,26 +258,25 @@ export const InventoryScreen: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-3 text-center">
-                      {isOutOfStock ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold">
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>Out of stock</span>
-                        </span>
-                      ) : isLow ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>Low stock</span>
-                        </span>
-                      ) : isExpiring ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold">
-                          <span>Expiring soon</span>
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold">
-                          <Check className="w-3 h-3" />
-                          <span>In stock</span>
-                        </span>
-                      )}
+                      <div className="flex flex-col items-center gap-1">
+                        {isOutOfStock ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>Out of stock</span>
+                          </span>
+                        ) : isLow ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>Low stock</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-[11px] font-semibold">
+                            <Check className="w-3 h-3" />
+                            <span>In stock</span>
+                          </span>
+                        )}
+                        {isExpiring && <span className="text-[10px] font-semibold text-orange-700">Expiring soon</span>}
+                      </div>
                     </td>
 
                     <td className="py-3 px-3 text-right font-mono tabular-nums text-slate-700 text-xs font-medium">
@@ -265,13 +288,35 @@ export const InventoryScreen: React.FC = () => {
                     </td>
 
                     <td className="py-3 px-4 sm:px-6 text-center">
-                      <button
-                        onClick={() => handleOpenBinCard(item.id)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded transition-colors shadow-2xs"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Bin card</span>
-                      </button>
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => setItemToEdit(item)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded transition-colors shadow-2xs"
+                          aria-label={`Edit ${item.name}`}
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          onClick={() => handleOpenBinCard(item.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 rounded transition-colors shadow-2xs"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Bin card</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDeleteError('');
+                            setItemToDelete(item);
+                          }}
+                          disabled={isDeletingItemId === item.id}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-rose-700 bg-white hover:bg-rose-50 border border-rose-200 rounded transition-colors shadow-2xs disabled:opacity-60"
+                          aria-label={`Permanently delete ${item.name}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{isDeletingItemId === item.id ? 'Deleting…' : 'Delete'}</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -295,6 +340,40 @@ export const InventoryScreen: React.FC = () => {
       {/* Add Item Modal */}
       {isAddModalOpen && (
         <AddItemModal onClose={() => setIsAddModalOpen(false)} />
+      )}
+      {itemToEdit && (
+        <EditInventoryItemModal item={itemToEdit} onClose={() => setItemToEdit(null)} />
+      )}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-sm">
+          <section role="alertdialog" aria-modal="true" aria-labelledby="delete-item-title" className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+            <header className="flex items-center justify-between bg-rose-700 px-6 py-4 text-white">
+              <div className="flex items-center gap-3">
+                <Trash2 className="h-5 w-5" />
+                <h2 id="delete-item-title" className="font-bold">Permanently delete inventory item</h2>
+              </div>
+              <button type="button" onClick={() => setItemToDelete(null)} disabled={isDeletingItemId !== null} aria-label="Cancel deletion" className="rounded-lg p-1.5 text-rose-100 hover:bg-rose-800 disabled:opacity-60">
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+            <div className="space-y-4 p-6">
+              <p className="text-sm text-slate-700">Delete <strong>{itemToDelete.name}</strong> permanently?</p>
+              <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-relaxed text-rose-800">
+                This also permanently deletes {itemToDelete.currentBalance} {itemToDelete.unit} remaining, all batches, and the stock ledger history. This cannot be undone.
+              </p>
+              {deleteError && <p role="alert" className="rounded-lg border border-rose-200 bg-white px-3.5 py-2.5 text-sm text-rose-700">{deleteError}</p>}
+              <div className="flex justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setItemToDelete(null)} disabled={isDeletingItemId !== null} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                  Cancel
+                </button>
+                <button type="button" onClick={() => void handleDeleteItem()} disabled={isDeletingItemId !== null} className="inline-flex items-center gap-2 rounded-lg bg-rose-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-60">
+                  <Trash2 className="h-4 w-4" />
+                  {isDeletingItemId !== null ? 'Deleting…' : 'Delete permanently'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );

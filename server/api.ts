@@ -61,6 +61,12 @@ function validText(value: unknown, maxLength = 200): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= maxLength;
 }
 
+function validEmail(value: unknown): value is string {
+  return typeof value === 'string' &&
+    value.trim().length <= 254 &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function validNumber(value: unknown, min = 0): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= min;
 }
@@ -231,6 +237,52 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
   };
 
   app.get('/api/health', (_req, res) => res.json({ status: 'online', app: 'Axelle MD' }));
+
+  app.post('/api/auth/password-reset', requireConfiguration, async (req, res, next) => {
+    try {
+      const email = isRecord(req.body) ? req.body.email : undefined;
+      if (!validEmail(email)) {
+        res.status(400).json({ error: 'Enter a valid email address.' });
+        return;
+      }
+      const { error } = await supabase!.auth.resetPasswordForEmail(email.trim());
+      if (error) {
+        console.error('Password reset email request failed:', error.message);
+        res.status(500).json({ error: 'We could not send the reset email right now. Please try again.' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/auth/password-reset/complete', requireConfiguration, async (req, res, next) => {
+    try {
+      const body = isRecord(req.body) ? req.body : {};
+      if (!validText(body.accessToken, 8192) || !validText(body.password, 128) || body.password.length < 8) {
+        res.status(400).json({ error: 'Provide a valid reset session and a password with at least 8 characters.' });
+        return;
+      }
+      const { data: userData, error: tokenError } = await supabase!.auth.getUser(body.accessToken);
+      if (tokenError || !userData.user) {
+        res.status(401).json({ error: 'The password reset link is invalid or has expired. Request a new link.' });
+        return;
+      }
+      const { error: updateError } = await supabase!.auth.admin.updateUserById(userData.user.id, {
+        password: body.password,
+      });
+      if (updateError) {
+        console.error('Password update failed:', updateError.message);
+        res.status(400).json({ error: 'We could not update that password. Check your password requirements and try again.' });
+        return;
+      }
+      res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${signSession(userData.user.id, sessionSecret!, true)}; ${cookieOptions(true)}`);
+      res.json({ authenticated: true, userId: userData.user.id });
+    } catch (error) {
+      next(error);
+    }
+  });
 
   app.post('/api/auth/session', requireConfiguration, async (req, res, next) => {
     try {
@@ -529,6 +581,102 @@ export function createApiApp(dependencies: ApiDependencies = {}) {
         return;
       }
       res.status(201).json({ id: data });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch('/api/inventory/:itemId', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const body = req.body as Record<string, unknown>;
+      if (
+        !isRecord(body) ||
+        !validText(body.name, 160) ||
+        !validText(body.sku, 80) ||
+        !validText(body.category, 100) ||
+        !validNumber(body.minThreshold) ||
+        !Number.isInteger(body.minThreshold) ||
+        !validNumber(body.costPriceGhc) ||
+        !validNumber(body.sellingPriceGhc) ||
+        typeof body.presentation !== 'string' ||
+        body.presentation.length > 100 ||
+        typeof body.shelfLocation !== 'string' ||
+        body.shelfLocation.length > 100 ||
+        typeof body.formDescription !== 'string' ||
+        body.formDescription.length > 200
+      ) {
+        res.status(400).json({ error: 'Enter valid medicine details and non-negative price and threshold values.' });
+        return;
+      }
+
+      const itemQuery = supabase!.from('formulary_items').select('current_balance')
+        .eq('pharmacy_id', profile.id).eq('id', req.params.itemId);
+      const { data: existingItem, error: lookupError } = await itemQuery.maybeSingle();
+      if (lookupError) {
+        console.error('Inventory item lookup failed:', lookupError.message);
+        res.status(500).json({ error: 'We could not load this inventory item.' });
+        return;
+      }
+      if (!existingItem) {
+        res.status(404).json({ error: 'This medicine is not in your pharmacy inventory.' });
+        return;
+      }
+
+      const currentBalance = Number(existingItem.current_balance);
+      const status = currentBalance === 0 ? 'Out of stock' : currentBalance <= body.minThreshold ? 'Low stock' : 'In stock';
+      const { data, error } = await supabase!.from('formulary_items').update({
+        sku: body.sku.trim(),
+        name: body.name.trim(),
+        presentation: body.presentation.trim(),
+        category: body.category.trim(),
+        min_threshold: body.minThreshold,
+        shelf_location: body.shelfLocation.trim(),
+        form_description: body.formDescription.trim(),
+        cost_price_ghc: body.costPriceGhc,
+        selling_price_ghc: body.sellingPriceGhc,
+        status,
+      }).eq('pharmacy_id', profile.id).eq('id', req.params.itemId).select('id').maybeSingle();
+      if (error) {
+        if (error.code === '23505') {
+          res.status(409).json({ error: 'That SKU is already in use by another inventory item.' });
+          return;
+        }
+        console.error('Inventory item update failed:', error.message);
+        res.status(500).json({ error: 'We could not update this medicine.' });
+        return;
+      }
+      if (!data) {
+        res.status(404).json({ error: 'This medicine is not in your pharmacy inventory.' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete('/api/inventory/:itemId', requireConfiguration, authenticate, requireRoles('admin', 'pharmacist', 'inventory_clerk'), async (req, res, next) => {
+    try {
+      const profile = await requirePharmacy(res.locals.userId as string, res);
+      if (!profile) return;
+      const { data, error } = await supabase!.from('formulary_items')
+        .delete()
+        .eq('pharmacy_id', profile.id)
+        .eq('id', req.params.itemId)
+        .select('id')
+        .maybeSingle();
+      if (error) {
+        console.error('Inventory item deletion failed:', error.message);
+        res.status(500).json({ error: 'We could not delete this medicine.' });
+        return;
+      }
+      if (!data) {
+        res.status(404).json({ error: 'This medicine is not in your pharmacy inventory.' });
+        return;
+      }
+      res.json({ success: true });
     } catch (error) {
       next(error);
     }

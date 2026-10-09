@@ -3,7 +3,7 @@ import { Eye, EyeOff, Loader2, Check } from 'lucide-react';
 
 interface LoginScreenProps {
   onSubmit: (email: string, password: string, remember: boolean) => Promise<void>;
-  onForgotPassword?: () => void;
+  onForgotPassword?: (email: string) => void;
   onCreateAccount?: () => void;
   initialEmail?: string;
   notice?: string;
@@ -151,7 +151,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onSubmit, onForgotPass
               {onForgotPassword && (
                 <button
                   type="button"
-                  onClick={onForgotPassword}
+                  onClick={() => onForgotPassword(email.trim())}
                   className="text-sm font-medium text-brand-600 hover:text-brand-700"
                 >
                   Forgot password?

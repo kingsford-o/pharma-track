@@ -22,12 +22,43 @@ const userProfile = {
   created_at: '2025-01-01T00:00:00.000Z',
   updated_at: '2025-01-01T00:00:00.000Z',
 };
+const inventoryItem = {
+  id: 'item-a',
+  pharmacy_id: 'pharmacy-a',
+  sku: 'SKU-A',
+  name: 'Paracetamol 500mg tablets',
+  current_balance: 12,
+  min_threshold: 10,
+  status: 'In stock',
+};
+let deletedInventoryItemId: string | null = null;
+let requestedPasswordResetEmail: string | null = null;
+let updatedPassword: string | null = null;
 
 function mockSupabase() {
   return {
+    auth: {
+      async resetPasswordForEmail(email: string) {
+        requestedPasswordResetEmail = email;
+        return { data: {}, error: null };
+      },
+      async getUser(token: string) {
+        return token === 'valid-recovery-token'
+          ? { data: { user: { id: 'user-a' } }, error: null }
+          : { data: { user: null }, error: new Error('Invalid token') };
+      },
+      admin: {
+        async updateUserById(userId: string, attributes: { password: string }) {
+          if (userId !== 'user-a') return { data: { user: null }, error: new Error('Unknown user') };
+          updatedPassword = attributes.password;
+          return { data: { user: { id: userId } }, error: null };
+        },
+      },
+    },
     from: (table: string) => ({
       filters: {} as Record<string, unknown>,
       updates: {} as Record<string, unknown>,
+      deleting: false,
       select() {
         return this;
       },
@@ -35,13 +66,30 @@ function mockSupabase() {
         this.updates = values;
         return this;
       },
+      delete() {
+        this.deleting = true;
+        return this;
+      },
       eq(column: string, value: unknown) {
         this.filters[column] = value;
         return this;
       },
       async maybeSingle() {
+        if (table === 'formulary_items' && this.deleting) {
+          const matches = Object.entries(this.filters).every(([key, value]) => inventoryItem[key as keyof typeof inventoryItem] === value);
+          if (!matches) return { data: null, error: null };
+          deletedInventoryItemId = inventoryItem.id;
+          return { data: { id: inventoryItem.id }, error: null };
+        }
         if (table === 'user_profiles' && this.filters.id === userProfile.id) {
           Object.assign(userProfile, this.updates);
+        }
+        if (
+          table === 'formulary_items' &&
+          Object.entries(this.filters).every(([key, value]) => inventoryItem[key as keyof typeof inventoryItem] === value)
+        ) {
+          Object.assign(inventoryItem, this.updates);
+          return { data: inventoryItem, error: null };
         }
         const row = table === 'user_profiles'
           ? (userProfile.id === this.filters.id ? userProfile : null)
@@ -235,6 +283,13 @@ test('Vercel dispatcher preserves dynamic inventory routes and query strings', a
     assert.ok(response.status === 401 || response.status === 503);
     assert.match(response.headers.get('content-type') ?? '', /application\/json/);
     assert.equal(typeof (await response.json() as { error?: unknown }).error, 'string');
+    const deleteResponse = await fetch(`http://127.0.0.1:${address.port}/api/dispatch?__axellePath=%2Fapi%2Finventory%2Fitem-123`, {
+      method: 'DELETE',
+      headers: { Connection: 'close' },
+    });
+    assert.ok(deleteResponse.status === 401 || deleteResponse.status === 503);
+    assert.match(deleteResponse.headers.get('content-type') ?? '', /application\/json/);
+    assert.notDeepEqual(await deleteResponse.json(), { error: 'API endpoint not found.' });
   } finally {
     await new Promise<void>((resolve, reject) =>
       deploymentServer.close((error) => error ? reject(error) : resolve()),
@@ -282,8 +337,111 @@ test('staff role permissions block cashier access to administrator controls', as
   });
   assert.equal(inventoryWrite.status, 403);
   assert.deepEqual(await inventoryWrite.json(), { error: 'Your staff role does not have permission to perform this action.' });
+  const inventoryEdit = await fetch(`${baseUrl}/api/inventory/item-123`, {
+    method: 'PATCH',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(inventoryEdit.status, 403);
+  assert.deepEqual(await inventoryEdit.json(), { error: 'Your staff role does not have permission to perform this action.' });
+  const inventoryDelete = await fetch(`${baseUrl}/api/inventory/item-a`, {
+    method: 'DELETE',
+    headers: { Cookie: cookie },
+  });
+  assert.equal(inventoryDelete.status, 403);
+  assert.deepEqual(await inventoryDelete.json(), { error: 'Your staff role does not have permission to perform this action.' });
   const patientRecords = await fetch(`${baseUrl}/api/management/patients`, { headers: { Cookie: cookie } });
   assert.equal(patientRecords.status, 403);
   const managementRecords = await fetch(`${baseUrl}/api/management`, { headers: { Cookie: cookie } });
   assert.equal(managementRecords.status, 403);
+});
+
+test('inventory item edits save catalog details and grade against quantity remaining', async () => {
+  const login = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-a' }),
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+  const response = await fetch(`${baseUrl}/api/inventory/item-a`, {
+    method: 'PATCH',
+    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      sku: 'SKU-A-UPDATED',
+      name: 'Paracetamol 500mg',
+      presentation: 'Solid Oral',
+      category: 'Analgesic',
+      minThreshold: 12,
+      shelfLocation: 'Shelf A1',
+      formDescription: 'Tablets',
+      costPriceGhc: 1.25,
+      sellingPriceGhc: 2.5,
+    }),
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { success: true });
+  assert.equal(inventoryItem.current_balance, 12);
+  assert.equal(inventoryItem.min_threshold, 12);
+  assert.equal(inventoryItem.status, 'Low stock');
+  assert.equal(inventoryItem.name, 'Paracetamol 500mg');
+});
+
+test('inventory item deletion is pharmacy-scoped and returns success for an existing item', async () => {
+  deletedInventoryItemId = null;
+  const login = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-a' }),
+  });
+  const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0];
+  const response = await fetch(`${baseUrl}/api/inventory/item-a`, {
+    method: 'DELETE',
+    headers: { Cookie: cookie },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { success: true });
+  assert.equal(deletedInventoryItemId, 'item-a');
+
+  const otherPharmacyLogin = await fetch(`${baseUrl}/api/auth/session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-token-b' }),
+  });
+  const otherPharmacyCookie = (otherPharmacyLogin.headers.get('set-cookie') ?? '').split(';')[0];
+  const notOwned = await fetch(`${baseUrl}/api/inventory/item-a`, {
+    method: 'DELETE',
+    headers: { Cookie: otherPharmacyCookie },
+  });
+  assert.equal(notOwned.status, 404);
+  assert.deepEqual(await notOwned.json(), { error: 'This medicine is not in your pharmacy inventory.' });
+});
+
+test('password recovery requests and updates are handled by the server API', async () => {
+  requestedPasswordResetEmail = null;
+  updatedPassword = null;
+  const request = await fetch(`${baseUrl}/api/auth/password-reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'manager@example.test' }),
+  });
+  assert.equal(request.status, 200);
+  assert.deepEqual(await request.json(), { success: true });
+  assert.equal(requestedPasswordResetEmail, 'manager@example.test');
+
+  const update = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'valid-recovery-token', password: 'new-safe-password' }),
+  });
+  assert.equal(update.status, 200);
+  assert.deepEqual(await update.json(), { authenticated: true, userId: 'user-a' });
+  assert.match(update.headers.get('set-cookie') ?? '', /^pharmatrack_session=/);
+  assert.equal(updatedPassword, 'new-safe-password');
+
+  const invalid = await fetch(`${baseUrl}/api/auth/password-reset/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accessToken: 'invalid-token', password: 'new-safe-password' }),
+  });
+  assert.equal(invalid.status, 401);
 });

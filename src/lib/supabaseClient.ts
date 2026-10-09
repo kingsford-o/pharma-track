@@ -20,6 +20,6 @@ export const supabase = createClient(url ?? 'http://localhost', anonKey ?? 'miss
   auth: {
     autoRefreshToken: false,
     persistSession: false,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true,
   },
 });
