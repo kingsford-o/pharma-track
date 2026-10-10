@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Request, Response } from 'express';
-import { createPharmaTrackApp } from './app';
+import { createPharmaTrackApp } from './app.js';
 
 const app = createPharmaTrackApp();
 

@@ -1,5 +1,5 @@
-import { createApiApp, type ApiDependencies } from './api';
-import { handleSignup } from './authSignup';
+import { createApiApp, type ApiDependencies } from './api.js';
+import { handleSignup } from './authSignup.js';
 
 export function createPharmaTrackApp(dependencies: ApiDependencies = {}) {
   const app = createApiApp(dependencies);

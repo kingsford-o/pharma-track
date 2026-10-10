@@ -1,1 +1,1 @@
-export { handleVercelApiRequest as default } from '../server/vercelHandler';
+export { handleVercelApiRequest as default } from '../server/vercelHandler.js';
