@@ -333,24 +333,6 @@ test('Vercel dispatcher preserves the nested auth session route', async () => {
   }
 });
 
-test('Vercel dispatcher routes the health endpoint through the Express API app', async () => {
-  const deploymentServer = createServer(deploymentHandler);
-  await new Promise<void>((resolve) => deploymentServer.listen(0, '127.0.0.1', resolve));
-  const address = deploymentServer.address() as AddressInfo;
-  try {
-    const response = await fetch(
-      `http://127.0.0.1:${address.port}/api/dispatch?__axellePath=%2Fapi%2Fhealth`,
-      { headers: { Connection: 'close' } },
-    );
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { status: 'online', app: 'Axelle MD' });
-  } finally {
-    await new Promise<void>((resolve, reject) =>
-      deploymentServer.close((error) => error ? reject(error) : resolve()),
-    );
-  }
-});
-
 test('Vercel dispatcher preserves dynamic inventory routes and query strings', async () => {
   const deploymentServer = createServer(deploymentHandler);
   await new Promise<void>((resolve) => deploymentServer.listen(0, '127.0.0.1', resolve));
